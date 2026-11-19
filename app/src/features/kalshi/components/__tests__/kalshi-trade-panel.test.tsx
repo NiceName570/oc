@@ -442,4 +442,117 @@ describe("KalshiTradePanel", () => {
       });
     });
   });
+
+  test("warns when live price moves after staging, updates limit on click, and reports 0-fill IOC misses", async () => {
+    const user = userEvent.setup();
+    let current = makeSnapshot({
+      connected: true,
+      maskedApiKeyId: "abcd...wxyz",
+      maxOrderDollars: 25,
+      balance: {
+        balanceDollars: 100,
+        portfolioValueDollars: 100,
+        updatedAt: Date.now(),
+      },
+    });
+
+    const placeOrderMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        order: {
+          orderId: "ord-miss-1",
+          clientOrderId: "cid-miss-1",
+          fillCount: "0.00",
+          remainingCount: "5.00",
+          averageFillPrice: null,
+          averageFeePaid: null,
+          timestampMs: Date.now(),
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        order: {
+          orderId: "ord-fill-2",
+          clientOrderId: "cid-fill-2",
+          fillCount: "5.00",
+          remainingCount: "0.00",
+          averageFillPrice: 0.89,
+          averageFeePaid: 0.04,
+          timestampMs: Date.now(),
+        },
+      });
+
+    renderPanel({
+      snapshot: async () => current,
+      placeOrder: placeOrderMock,
+    });
+
+    await user.click(screen.getByRole("button", { name: "5" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Buy YES \(81¢\)/ }),
+    );
+    expect(
+      screen.getByText("IOC limit: won't fill worse than 81¢."),
+    ).toBeTruthy();
+
+    current = {
+      ...current,
+      market: {
+        ...current.market!,
+        yesAskDollars: 0.86,
+      },
+      updatedAt: Date.now(),
+    };
+    await user.click(
+      screen.getByRole("button", { name: "Refresh Kalshi quote" }),
+    );
+
+    expect(await screen.findByText("Live price moved to 86¢")).toBeTruthy();
+    expect(
+      screen.getByText(/Confirm Buy YES 5 @ 81¢ \(\$4\.05\)/),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(
+      await screen.findByText(
+        "Buy YES: 0 filled — live price moved past your 81¢ limit.",
+      ),
+    ).toBeTruthy();
+
+    await user.click(
+      await screen.findByRole("button", { name: /Buy YES \(86¢\)/ }),
+    );
+    current = {
+      ...current,
+      market: {
+        ...current.market!,
+        yesAskDollars: 0.89,
+      },
+      updatedAt: Date.now(),
+    };
+    await user.click(
+      screen.getByRole("button", { name: "Refresh Kalshi quote" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Update to 89¢" }),
+    );
+    expect(
+      screen.getByText(/Confirm Buy YES 5 @ 89¢ \(\$4\.45\)/),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(placeOrderMock).toHaveBeenLastCalledWith({
+        ticker: "KXBTC15M-26NOV191330-30",
+        action: "buy_yes",
+        count: 5,
+        limitPriceDollars: 0.89,
+        exchangeIndex: 2,
+      });
+    });
+    expect(
+      await screen.findByText("Buy YES: 5.00/5 filled @ 89¢ (ord-fill-2)."),
+    ).toBeTruthy();
+  });
 });

@@ -138,7 +138,7 @@ export function KalshiTradePanel({
     queryKey: SNAPSHOT_QUERY_KEY,
     queryFn: () => transport.rpc.kalshi.snapshot.query(),
     enabled: visible,
-    refetchInterval: 3000,
+    refetchInterval: 1000,
     retry: false,
   });
 
@@ -238,11 +238,28 @@ export function KalshiTradePanel({
         setOrderBanner({ tone: "error", text: result.error });
         return;
       }
-      const filled = result.order.fillCount;
-      setOrderBanner({
-        tone: "success",
-        text: `${order.sideLabel}: ${filled}/${order.count} filled (${result.order.orderId || "submitted"}).`,
-      });
+      const filledNum = Number(result.order.fillCount);
+      if (Number.isFinite(filledNum) && filledNum <= 0) {
+        setOrderBanner({
+          tone: "error",
+          text: `${order.sideLabel}: 0 filled — live price moved past your ${formatCents(order.limitPriceDollars)} limit.`,
+        });
+      } else {
+        const effectiveFillPrice =
+          result.order.averageFillPrice !== null
+            ? order.action === "buy_no" || order.action === "sell_no"
+              ? 1 - result.order.averageFillPrice
+              : result.order.averageFillPrice
+            : null;
+        setOrderBanner({
+          tone: "success",
+          text: `${order.sideLabel}: ${result.order.fillCount}/${order.count} filled${
+            effectiveFillPrice !== null
+              ? ` @ ${formatCents(effectiveFillPrice)}`
+              : ""
+          } (${result.order.orderId || "submitted"}).`,
+        });
+      }
       await queryClient.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
     },
     onError: (err) => {
@@ -272,6 +289,26 @@ export function KalshiTradePanel({
 
   const yesOverCap = yesBuyCost !== null && yesBuyCost > maxOrderDollars + 1e-9;
   const noOverCap = noBuyCost !== null && noBuyCost > maxOrderDollars + 1e-9;
+
+  const quoteAgeSec = snapshot
+    ? Math.max(0, Math.floor((nowMs - snapshot.updatedAt) / 1000))
+    : null;
+
+  const livePendingPriceDollars = pendingOrder
+    ? pendingOrder.action === "buy_yes"
+      ? (market?.yesAskDollars ?? null)
+      : pendingOrder.action === "buy_no"
+        ? (market?.noAskDollars ?? null)
+        : pendingOrder.action === "sell_yes"
+          ? (market?.yesBidDollars ?? null)
+          : (market?.noBidDollars ?? null)
+    : null;
+
+  const pendingPriceMoved =
+    pendingOrder !== null &&
+    livePendingPriceDollars !== null &&
+    Math.abs(livePendingPriceDollars - pendingOrder.limitPriceDollars) >=
+      0.0005;
 
   const showSetupCard =
     !snapshotQuery.isPending && (!connected || settingsOpen);
@@ -477,6 +514,24 @@ export function KalshiTradePanel({
               )}
             </span>
           </div>
+
+          {quoteAgeSec !== null && (
+            <div className="mt-1 flex items-center justify-between text-[10px]">
+              <span className="text-muted-foreground">Quote feed (1s)</span>
+              <span
+                className={cn(
+                  "font-mono tabular-nums",
+                  quoteAgeSec >= 5
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground",
+                )}
+              >
+                {quoteAgeSec === 0
+                  ? "Live · just now"
+                  : `Live · ${quoteAgeSec}s ago`}
+              </span>
+            </div>
+          )}
         </div>
 
         {snapshot?.marketError && (
@@ -565,6 +620,17 @@ export function KalshiTradePanel({
             </Button>
           </div>
 
+          {(yesBuyCost !== null || noBuyCost !== null) && (
+            <div className="grid grid-cols-2 gap-2 text-center font-mono text-[10px] tabular-nums text-muted-foreground">
+              <span>
+                {yesBuyCost !== null ? `Est. ${formatUsd(yesBuyCost)}` : "—"}
+              </span>
+              <span>
+                {noBuyCost !== null ? `Est. ${formatUsd(noBuyCost)}` : "—"}
+              </span>
+            </div>
+          )}
+
           {(yesOverCap || noOverCap) && (
             <div className="text-[11px] text-amber-600 dark:text-amber-400">
               {yesOverCap && `YES order (${formatUsd(yesBuyCost)}) `}
@@ -582,6 +648,34 @@ export function KalshiTradePanel({
               {formatCents(pendingOrder.limitPriceDollars)} (
               {formatUsd(pendingOrder.estimatedDollars)})
             </div>
+            <div className="text-[10px] text-muted-foreground">
+              IOC limit: won&apos;t fill worse than{" "}
+              {formatCents(pendingOrder.limitPriceDollars)}.
+            </div>
+            {pendingPriceMoved && livePendingPriceDollars !== null && (
+              <div className="flex items-center justify-between gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
+                <span>
+                  Live price moved to {formatCents(livePendingPriceDollars)}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  disabled={placeOrderMutation.isPending}
+                  onClick={() =>
+                    stageOrder(
+                      pendingOrder.action,
+                      livePendingPriceDollars,
+                      pendingOrder.count,
+                      pendingOrder.sideLabel,
+                    )
+                  }
+                >
+                  Update to {formatCents(livePendingPriceDollars)}
+                </Button>
+              </div>
+            )}
             <div className="flex items-center gap-1.5">
               <Button
                 type="button"
