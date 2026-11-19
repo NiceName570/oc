@@ -269,7 +269,7 @@ describe("KalshiTradePanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  test("blocks over-cap buys and requires inline confirmation before submitting Buy YES", async () => {
+  test("blocks over-cap buys and submits Buy YES immediately in one click without a confirmation box", async () => {
     const user = userEvent.setup();
     const placeOrderMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -313,12 +313,7 @@ describe("KalshiTradePanel", () => {
     expect((buyYesBtn as HTMLButtonElement).disabled).toBe(false);
 
     await user.click(buyYesBtn);
-    expect(
-      screen.getByText(/Confirm Buy YES 5 @ 81¢ \(\$4\.05\)/),
-    ).toBeTruthy();
-    expect(placeOrderMock).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
     await waitFor(() => {
       expect(placeOrderMock).toHaveBeenCalledWith({
         ticker: "KXBTC15M-26NOV191330-30",
@@ -328,6 +323,9 @@ describe("KalshiTradePanel", () => {
         exchangeIndex: 2,
       });
     });
+    expect(
+      await screen.findByText("Buy YES: 5.00/5 filled @ 81¢ (ord-yes-1)."),
+    ).toBeTruthy();
   });
 
   test("shows held position live P&L, gates Sell behind confirmation, and clears pending confirmation on ticker rollover", async () => {
@@ -443,7 +441,7 @@ describe("KalshiTradePanel", () => {
     });
   });
 
-  test("warns when live price moves after staging, updates limit on click, and reports 0-fill IOC misses", async () => {
+  test("reports 0-fill IOC misses on instant buys and warns on live bid drift before confirming Sell", async () => {
     const user = userEvent.setup();
     let current = makeSnapshot({
       connected: true,
@@ -453,6 +451,17 @@ describe("KalshiTradePanel", () => {
         balanceDollars: 100,
         portfolioValueDollars: 100,
         updatedAt: Date.now(),
+      },
+      position: {
+        ticker: "KXBTC15M-26NOV191330-30",
+        side: "yes",
+        contracts: 5,
+        costBasisDollars: 3,
+        realizedPnlDollars: 0,
+        feesPaidDollars: 0.05,
+        exitBidDollars: 0.72,
+        exitProceedsDollars: 3.6,
+        estimatedPnlDollars: 0.6,
       },
     });
 
@@ -477,8 +486,20 @@ describe("KalshiTradePanel", () => {
           clientOrderId: "cid-fill-2",
           fillCount: "5.00",
           remainingCount: "0.00",
-          averageFillPrice: 0.89,
+          averageFillPrice: 0.86,
           averageFeePaid: 0.04,
+          timestampMs: Date.now(),
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        order: {
+          orderId: "ord-sell-drift",
+          clientOrderId: "cid-sell-drift",
+          fillCount: "5.00",
+          remainingCount: "0.00",
+          averageFillPrice: 0.68,
+          averageFeePaid: 0.03,
           timestampMs: Date.now(),
         },
       });
@@ -493,7 +514,9 @@ describe("KalshiTradePanel", () => {
       await screen.findByRole("button", { name: /Buy YES \(81¢\)/ }),
     );
     expect(
-      screen.getByText("IOC limit: won't fill worse than 81¢."),
+      await screen.findByText(
+        "Buy YES: 0 filled — live price moved past your 81¢ limit.",
+      ),
     ).toBeTruthy();
 
     current = {
@@ -507,27 +530,38 @@ describe("KalshiTradePanel", () => {
     await user.click(
       screen.getByRole("button", { name: "Refresh Kalshi quote" }),
     );
-
-    expect(await screen.findByText("Live price moved to 86¢")).toBeTruthy();
-    expect(
-      screen.getByText(/Confirm Buy YES 5 @ 81¢ \(\$4\.05\)/),
-    ).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(
-      await screen.findByText(
-        "Buy YES: 0 filled — live price moved past your 81¢ limit.",
-      ),
-    ).toBeTruthy();
-
     await user.click(
       await screen.findByRole("button", { name: /Buy YES \(86¢\)/ }),
     );
+    await waitFor(() => {
+      expect(placeOrderMock).toHaveBeenNthCalledWith(2, {
+        ticker: "KXBTC15M-26NOV191330-30",
+        action: "buy_yes",
+        count: 5,
+        limitPriceDollars: 0.86,
+        exchangeIndex: 2,
+      });
+    });
+    expect(
+      await screen.findByText("Buy YES: 5.00/5 filled @ 86¢ (ord-fill-2)."),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Sell 5 YES @ 72¢" }));
+    expect(
+      screen.getByText("IOC limit: won't fill worse than 72¢."),
+    ).toBeTruthy();
+
     current = {
       ...current,
       market: {
         ...current.market!,
-        yesAskDollars: 0.89,
+        yesBidDollars: 0.68,
+      },
+      position: {
+        ...current.position!,
+        exitBidDollars: 0.68,
+        exitProceedsDollars: 3.4,
+        estimatedPnlDollars: 0.4,
       },
       updatedAt: Date.now(),
     };
@@ -535,24 +569,26 @@ describe("KalshiTradePanel", () => {
       screen.getByRole("button", { name: "Refresh Kalshi quote" }),
     );
     await user.click(
-      await screen.findByRole("button", { name: "Update to 89¢" }),
+      await screen.findByRole("button", { name: "Update to 68¢" }),
     );
     expect(
-      screen.getByText(/Confirm Buy YES 5 @ 89¢ \(\$4\.45\)/),
+      screen.getByText(/Confirm Sell YES 5 @ 68¢ \(\$3\.40\)/),
     ).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Confirm" }));
 
     await waitFor(() => {
       expect(placeOrderMock).toHaveBeenLastCalledWith({
         ticker: "KXBTC15M-26NOV191330-30",
-        action: "buy_yes",
+        action: "sell_yes",
         count: 5,
-        limitPriceDollars: 0.89,
+        limitPriceDollars: 0.68,
         exchangeIndex: 2,
       });
     });
     expect(
-      await screen.findByText("Buy YES: 5.00/5 filled @ 89¢ (ord-fill-2)."),
+      await screen.findByText(
+        "Sell YES: 5.00/5 filled @ 68¢ (ord-sell-drift).",
+      ),
     ).toBeTruthy();
   });
 });

@@ -340,8 +340,7 @@ export function KalshiTradePanel({
       });
       return;
     }
-    setOrderBanner(null);
-    setPendingOrder({
+    const order: PendingOrder = {
       ticker: market.ticker,
       action,
       count,
@@ -349,7 +348,14 @@ export function KalshiTradePanel({
       exchangeIndex: market.exchangeIndex,
       sideLabel,
       estimatedDollars,
-    });
+    };
+    setOrderBanner(null);
+    if (action === "buy_yes" || action === "buy_no") {
+      setPendingOrder(null);
+      placeOrderMutation.mutate(order);
+      return;
+    }
+    setPendingOrder(order);
   };
 
   const handleConnectSubmit = (event: React.FormEvent) => {
@@ -602,7 +608,10 @@ export function KalshiTradePanel({
                 stageOrder("buy_yes", yesAsk, validCount, "Buy YES")
               }
             >
-              Buy YES ({formatCents(yesAsk)})
+              {placeOrderMutation.isPending &&
+              placeOrderMutation.variables?.action === "buy_yes"
+                ? "Buying YES..."
+                : `Buy YES (${formatCents(yesAsk)})`}
             </Button>
             <Button
               type="button"
@@ -616,7 +625,10 @@ export function KalshiTradePanel({
               }
               onClick={() => stageOrder("buy_no", noAsk, validCount, "Buy NO")}
             >
-              Buy NO ({formatCents(noAsk)})
+              {placeOrderMutation.isPending &&
+              placeOrderMutation.variables?.action === "buy_no"
+                ? "Buying NO..."
+                : `Buy NO (${formatCents(noAsk)})`}
             </Button>
           </div>
 
@@ -876,8 +888,8 @@ export function KalshiTradePanel({
                 className="flex flex-col gap-2"
               >
                 <p className="text-[11px] text-muted-foreground">
-                  Encrypted locally on this machine. Live orders only submit
-                  after you confirm.
+                  Encrypted locally on this machine. Buy orders submit
+                  immediately up to your max cap.
                 </p>
                 <div>
                   <label
