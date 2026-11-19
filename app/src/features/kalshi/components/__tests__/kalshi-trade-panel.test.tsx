@@ -10,6 +10,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppTransport } from "@openchart/app/lib/transport/transport";
 import { WidgetContext } from "@openchart/app/lib/widget/widget";
 
+import { KalshiTradePanel } from "../kalshi-trade-panel";
 import { kalshiWidget } from "../widget";
 
 type SnapshotOutput = Awaited<
@@ -150,9 +151,25 @@ describe("KalshiTradePanel", () => {
     cleanup();
   });
 
-  test("renders live strike, BTC spot, distance to strike, and handles connect errors before connecting", async () => {
+  test("shows Buy YES/NO immediately when disconnected, prompts connect on click, and handles connect errors before connecting", async () => {
     const user = userEvent.setup();
-    let current = makeSnapshot();
+    let current = makeSnapshot({
+      market: {
+        ticker: "KXBTC15M-26NOV191330-30",
+        eventTicker: "KXBTC15M-26NOV191330",
+        title: "BTC 15m up or down",
+        strikeDollars: 62653.28,
+        openTime: "2026-11-19T18:15:00Z",
+        closeTime: new Date(Date.now() + 9 * 60 * 1000).toISOString(),
+        exchangeIndex: 2,
+        yesBidDollars: 0.018,
+        yesAskDollars: 0.019,
+        noBidDollars: 0.981,
+        noAskDollars: 0.982,
+        lastPriceDollars: 0.019,
+      },
+    });
+    const placeOrderMock = vi.fn();
 
     const connectMock = vi
       .fn()
@@ -180,12 +197,28 @@ describe("KalshiTradePanel", () => {
     renderPanel({
       snapshot: async () => current,
       connect: connectMock,
+      placeOrder: placeOrderMock,
     });
 
     expect(await screen.findByText("$62,653.28")).toBeTruthy();
     expect(screen.getByText("$62,803.80")).toBeTruthy();
     expect(screen.getByText(/\+\$150\.52 \(\+0\.24%\)/)).toBeTruthy();
     expect(screen.getByText("Connect Live Kalshi Key")).toBeTruthy();
+
+    const buyYesDisconnected = screen.getByRole("button", {
+      name: /Buy YES \(1\.9¢\)/,
+    });
+    expect(
+      screen.getByRole("button", { name: /Buy NO \(98\.2¢\)/ }),
+    ).toBeTruthy();
+
+    await user.click(buyYesDisconnected);
+    expect(
+      screen.getByText(
+        "Connect your Kalshi API key below to submit live orders.",
+      ),
+    ).toBeTruthy();
+    expect(placeOrderMock).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText("API Key ID"), "abcd-key-wxyz");
     await user.type(
@@ -204,6 +237,36 @@ describe("KalshiTradePanel", () => {
       await screen.findByRole("button", { name: /Buy YES \(81¢\)/ }),
     ).toBeTruthy();
     expect(screen.getByText("$125.50")).toBeTruthy();
+  });
+
+  test("works standalone via transport prop without WidgetContext and triggers onClose", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const transport = {
+      url: "test",
+      rpc: {
+        kalshi: {
+          snapshot: { query: async () => makeSnapshot() },
+        },
+      },
+    } as unknown as AppTransport;
+
+    render(
+      <QueryClientProvider client={client}>
+        <KalshiTradePanel transport={transport} onClose={onClose} />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: /Buy YES \(81¢\)/ }),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Close Kalshi panel" }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   test("blocks over-cap buys and requires inline confirmation before submitting Buy YES", async () => {

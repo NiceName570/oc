@@ -15,6 +15,8 @@ import {
   CopilotControlsProvider,
   type CopilotPrefill,
 } from "@openchart/app/app/agent/copilot-controls";
+import { KalshiPanelControlsProvider } from "@openchart/app/app/kalshi/kalshi-controls";
+import { KalshiSidePanel } from "@openchart/app/app/kalshi/kalshi-side-panel";
 import { useDashboardActions } from "@openchart/app/app/dashboard/use-dashboard-actions";
 import {
   SidebarProvider,
@@ -65,9 +67,18 @@ function AppLayoutContent({
   const savedThreadRoute = useMatch("/app/sessions/:sessionId");
   const hasCopilot = !newThreadRoute && !savedThreadRoute;
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [kalshiOpen, setKalshiOpen] = useState(false);
   const [copilotSessionID, setCopilotSessionID] = useState<string>();
   const [copilotPrefill, setCopilotPrefill] = useState<CopilotPrefill>();
   const copilotVisible = hasCopilot && copilotOpen;
+
+  function toggleKalshi() {
+    setKalshiOpen((value) => {
+      const next = !value;
+      if (next) setCopilotOpen(false);
+      return next;
+    });
+  }
   const sessionOrderBy = useSidebarSort((state) => state.chats);
   const agent = useAgent({ transport, sessionOrderBy });
   const [renamingSession, setRenamingSession] = useState<ListedSession>();
@@ -84,7 +95,7 @@ function AppLayoutContent({
     [host, navigate],
   );
   const { isMobile, setOpenMobile } = useSidebar();
-  const pageHidden = copilotVisible && isMobile;
+  const pageHidden = (copilotVisible || kalshiOpen) && isMobile;
 
   function selectSession(id: string) {
     void navigate(`/app/sessions/${encodeURIComponent(id)}`);
@@ -153,29 +164,40 @@ function AppLayoutContent({
                   hasCopilot
                     ? {
                         open: copilotOpen,
-                        toggle: () => setCopilotOpen((value) => !value),
+                        toggle: () =>
+                          setCopilotOpen((value) => {
+                            const next = !value;
+                            if (next) setKalshiOpen(false);
+                            return next;
+                          }),
                         selectSession: (sessionID) => {
                           setCopilotPrefill(undefined);
                           setCopilotSessionID(sessionID);
+                          setKalshiOpen(false);
                           setCopilotOpen(true);
                         },
                         prefill: (text) => {
                           setCopilotPrefill({ text });
+                          setKalshiOpen(false);
                           setCopilotOpen(true);
                         },
                       }
                     : null
                 }
               >
-                <WorkspaceFileMergeProvider>
-                  <IndicatorLibraryProvider
-                    transport={transport}
-                    onOpen={onOpenIndicators}
-                    suspended={onboarding === "pine-conversion"}
-                  >
-                    <Outlet context={routeContext} />
-                  </IndicatorLibraryProvider>
-                </WorkspaceFileMergeProvider>
+                <KalshiPanelControlsProvider
+                  value={{ open: kalshiOpen, toggle: toggleKalshi }}
+                >
+                  <WorkspaceFileMergeProvider>
+                    <IndicatorLibraryProvider
+                      transport={transport}
+                      onOpen={onOpenIndicators}
+                      suspended={onboarding === "pine-conversion"}
+                    >
+                      <Outlet context={routeContext} />
+                    </IndicatorLibraryProvider>
+                  </WorkspaceFileMergeProvider>
+                </KalshiPanelControlsProvider>
               </CopilotControlsProvider>
             </SidebarInset>
             <CopilotAgent
@@ -186,6 +208,11 @@ function AppLayoutContent({
               onSelectSession={setCopilotSessionID}
               open={copilotVisible}
               onClose={() => setCopilotOpen(false)}
+            />
+            <KalshiSidePanel
+              transport={transport}
+              open={kalshiOpen}
+              onClose={() => setKalshiOpen(false)}
             />
             {renamingSession ? (
               <RenameSessionDialog

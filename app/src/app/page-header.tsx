@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 
 import { CopilotTrigger } from "@openchart/app/app/agent/copilot-controls";
+import { KalshiTrigger } from "@openchart/app/app/kalshi/kalshi-controls";
 import {
   SidebarTrigger,
   useSidebar,
@@ -32,6 +33,7 @@ export function PageHeader({
         {center ? <div>{center}</div> : null}
         <div className="flex items-center justify-end gap-1">
           {actions}
+          <KalshiTrigger />
           <CopilotTrigger />
         </div>
       </div>
