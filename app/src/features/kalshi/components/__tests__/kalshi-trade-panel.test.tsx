@@ -1,5 +1,5 @@
 /// <reference types="vitest/jsdom" />
-// Purpose: Verify KalshiTradePanel market strike/distance display, credential connect flow, cap guards, confirm-gated buys, and live exit P&L sells.
+// Purpose: Verify KalshiTradePanel 1-click buys/sells, Dollars/Shares sizing, strike readout, and auto/adjustable TP/SL brackets.
 
 import { defineId } from "@openchart/identifier";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -41,6 +41,8 @@ function makeSnapshot(overrides: Partial<SnapshotOutput> = {}): SnapshotOutput {
     distancePercent: 0.2402,
     balance: null,
     position: null,
+    bracket: null,
+    lastBracketEvent: null,
     marketError: null,
     accountError: null,
     updatedAt: Date.now(),
@@ -61,7 +63,17 @@ function renderPanel(rpcOverrides: {
     count: number;
     limitPriceDollars: number;
     exchangeIndex?: number;
+    takeProfitOffsetCents?: number;
+    stopLossOffsetCents?: number;
   }) => Promise<unknown>;
+  setBracket?: (input: {
+    ticker: string;
+    side: "yes" | "no";
+    takeProfitDollars: number | null;
+    stopLossDollars: number | null;
+    exchangeIndex?: number;
+  }) => Promise<unknown>;
+  clearBracket?: (input: { ticker?: string }) => Promise<unknown>;
   setMaxOrderDollars?: (input: { maxOrderDollars: number }) => Promise<unknown>;
   disconnect?: () => Promise<unknown>;
 }) {
@@ -105,7 +117,18 @@ function renderPanel(rpcOverrides: {
                 averageFeePaid: 0.01,
                 timestampMs: Date.now(),
               },
+              bracket: null,
             }),
+        },
+        setBracket: {
+          mutate:
+            rpcOverrides.setBracket ??
+            vi.fn().mockResolvedValue({ ok: true, bracket: null }),
+        },
+        clearBracket: {
+          mutate:
+            rpcOverrides.clearBracket ??
+            vi.fn().mockResolvedValue({ ok: true }),
         },
         setMaxOrderDollars: {
           mutate:
@@ -151,7 +174,7 @@ describe("KalshiTradePanel", () => {
     cleanup();
   });
 
-  test("shows Buy YES/NO immediately when disconnected, prompts connect on click, and handles connect errors before connecting", async () => {
+  test("shows Buy YES/NO immediately when disconnected, prompts connect on click, and handles connect errors", async () => {
     const user = userEvent.setup();
     let current = makeSnapshot({
       market: {
@@ -269,27 +292,50 @@ describe("KalshiTradePanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  test("blocks over-cap buys and submits Buy YES immediately in one click without a confirmation box", async () => {
+  test("supports Dollars ($) and Shares sizing, cap guards, and 1-click Buy with Auto TP/SL offsets", async () => {
     const user = userEvent.setup();
-    const placeOrderMock = vi.fn().mockResolvedValue({
-      ok: true,
-      order: {
-        orderId: "ord-yes-1",
-        clientOrderId: "cid-yes-1",
-        fillCount: "5.00",
-        remainingCount: "0.00",
-        averageFillPrice: 0.81,
-        averageFeePaid: 0.03,
-        timestampMs: Date.now(),
-      },
-    });
+    const placeOrderMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        order: {
+          orderId: "ord-usd-1",
+          clientOrderId: "cid-usd-1",
+          fillCount: "12.00",
+          remainingCount: "0.00",
+          averageFillPrice: 0.81,
+          averageFeePaid: 0.05,
+          timestampMs: Date.now(),
+        },
+        bracket: null,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        order: {
+          orderId: "ord-sh-2",
+          clientOrderId: "cid-sh-2",
+          fillCount: "5.00",
+          remainingCount: "0.00",
+          averageFillPrice: 0.81,
+          averageFeePaid: 0.03,
+          timestampMs: Date.now(),
+        },
+        bracket: {
+          ticker: "KXBTC15M-26NOV191330-30",
+          side: "yes",
+          takeProfitDollars: 0.91,
+          stopLossDollars: 0.73,
+          exchangeIndex: 2,
+          updatedAt: Date.now(),
+        },
+      });
 
     renderPanel({
       snapshot: async () =>
         makeSnapshot({
           connected: true,
           maskedApiKeyId: "abcd...wxyz",
-          maxOrderDollars: 5,
+          maxOrderDollars: 10,
           balance: {
             balanceDollars: 80,
             portfolioValueDollars: 80,
@@ -303,37 +349,64 @@ describe("KalshiTradePanel", () => {
       name: /Buy YES \(81¢\)/,
     });
 
-    await user.click(screen.getByRole("button", { name: "10" }));
-    expect(
-      screen.getByText(/YES order \(\$8\.10\) exceeds \$5\.00 cap/i),
-    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "$25" }));
+    expect(screen.getByText(/exceeds \$10\.00 cap/i)).toBeTruthy();
     expect((buyYesBtn as HTMLButtonElement).disabled).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "5" }));
+    const amountInput = screen.getByLabelText("Amount ($)");
+    await user.clear(amountInput);
+    await user.type(amountInput, "0.5");
+    expect(screen.getByText("Min $0.81")).toBeTruthy();
+    expect((buyYesBtn as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "$10" }));
+    expect(screen.getByText("12 sh · $9.72")).toBeTruthy();
     expect((buyYesBtn as HTMLButtonElement).disabled).toBe(false);
 
     await user.click(buyYesBtn);
     expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
     await waitFor(() => {
-      expect(placeOrderMock).toHaveBeenCalledWith({
+      expect(placeOrderMock).toHaveBeenNthCalledWith(1, {
+        ticker: "KXBTC15M-26NOV191330-30",
+        action: "buy_yes",
+        count: 12,
+        limitPriceDollars: 0.81,
+        exchangeIndex: 2,
+        takeProfitOffsetCents: undefined,
+        stopLossOffsetCents: undefined,
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Shares" }));
+    await user.click(screen.getByRole("button", { name: "5" }));
+    await user.type(screen.getByLabelText("Auto TP (+¢)"), "10");
+    await user.type(screen.getByLabelText("Auto SL (-¢)"), "8");
+
+    await user.click(screen.getByRole("button", { name: /Buy YES \(81¢\)/ }));
+    await waitFor(() => {
+      expect(placeOrderMock).toHaveBeenNthCalledWith(2, {
         ticker: "KXBTC15M-26NOV191330-30",
         action: "buy_yes",
         count: 5,
         limitPriceDollars: 0.81,
         exchangeIndex: 2,
+        takeProfitOffsetCents: 10,
+        stopLossOffsetCents: 8,
       });
     });
     expect(
-      await screen.findByText("Buy YES: 5.00/5 filled @ 81¢ (ord-yes-1)."),
+      await screen.findByText(
+        /Buy YES: 5\.00\/5 filled @ 81¢ \(ord-sh-2\) • TP 91¢ \/ SL 73¢ armed/,
+      ),
     ).toBeTruthy();
   });
 
-  test("shows held position live P&L, gates Sell behind confirmation, and clears pending confirmation on ticker rollover", async () => {
+  test("submits 1-click Sell with no confirmation and edits/clears TP/SL brackets on Open Position", async () => {
     const user = userEvent.setup();
     let current = makeSnapshot({
       connected: true,
       maskedApiKeyId: "abcd...wxyz",
-      maxOrderDollars: 10,
+      maxOrderDollars: 25,
       balance: {
         balanceDollars: 75,
         portfolioValueDollars: 82.2,
@@ -350,244 +423,121 @@ describe("KalshiTradePanel", () => {
         exitProceedsDollars: 7.2,
         estimatedPnlDollars: 2.7,
       },
+      bracket: {
+        ticker: "KXBTC15M-26NOV191330-30",
+        side: "yes",
+        takeProfitDollars: 0.82,
+        stopLossDollars: 0.4,
+        exchangeIndex: 2,
+        updatedAt: 1000,
+      },
+      lastBracketEvent: {
+        ticker: "KXBTC15M-OLD",
+        side: "no",
+        trigger: "take_profit",
+        status: "filled",
+        message: "Take Profit hit: sold 4.00 NO @ 65¢.",
+        timestampMs: 999,
+      },
     });
 
     const placeOrderMock = vi.fn().mockResolvedValue({
       ok: true,
       order: {
-        orderId: "ord-sell-1",
-        clientOrderId: "cid-sell-1",
+        orderId: "ord-sell-now",
+        clientOrderId: "cid-sell-now",
         fillCount: "10.00",
         remainingCount: "0.00",
         averageFillPrice: 0.72,
         averageFeePaid: 0.04,
         timestampMs: Date.now(),
       },
+      bracket: null,
+    });
+
+    const setBracketMock = vi.fn().mockImplementation(async (input) => {
+      current = {
+        ...current,
+        bracket: {
+          ticker: input.ticker,
+          side: input.side,
+          takeProfitDollars: input.takeProfitDollars,
+          stopLossDollars: input.stopLossDollars,
+          exchangeIndex: input.exchangeIndex,
+          updatedAt: 2000,
+        },
+      };
+      return { ok: true, bracket: current.bracket };
+    });
+
+    const clearBracketMock = vi.fn().mockImplementation(async () => {
+      current = { ...current, bracket: null };
+      return { ok: true };
     });
 
     renderPanel({
       snapshot: async () => current,
       placeOrder: placeOrderMock,
+      setBracket: setBracketMock,
+      clearBracket: clearBracketMock,
     });
 
-    expect(await screen.findByText("YES × 10")).toBeTruthy();
-    expect(screen.getByText("+$2.70")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Sell 10 YES @ 72¢" }));
     expect(
-      screen.getByText(/Confirm Sell YES 10 @ 72¢ \(\$7\.20\)/),
+      await screen.findByText("Take Profit hit: sold 4.00 NO @ 65¢."),
     ).toBeTruthy();
-
-    current = makeSnapshot({
-      connected: true,
-      maskedApiKeyId: "abcd...wxyz",
-      maxOrderDollars: 10,
-      market: {
-        ticker: "KXBTC15M-26NOV191345-45",
-        eventTicker: "KXBTC15M-26NOV191345",
-        title: "BTC 15m up or down",
-        strikeDollars: 62810,
-        openTime: "2026-11-19T18:30:00Z",
-        closeTime: new Date(Date.now() + 14 * 60 * 1000).toISOString(),
-        exchangeIndex: 2,
-        yesBidDollars: 0.5,
-        yesAskDollars: 0.52,
-        noBidDollars: 0.48,
-        noAskDollars: 0.5,
-        lastPriceDollars: 0.51,
-      },
-    });
-
     await user.click(
-      screen.getByRole("button", { name: "Refresh Kalshi quote" }),
-    );
-    await waitFor(() => {
-      expect(screen.queryByText(/Confirm Sell YES 10/)).toBeNull();
-    });
-    expect(placeOrderMock).not.toHaveBeenCalled();
-
-    current = {
-      ...current,
-      position: {
-        ticker: "KXBTC15M-26NOV191345-45",
-        side: "no",
-        contracts: 4,
-        costBasisDollars: 1.6,
-        realizedPnlDollars: 0,
-        feesPaidDollars: 0.04,
-        exitBidDollars: 0.48,
-        exitProceedsDollars: 1.92,
-        estimatedPnlDollars: 0.32,
-      },
-    };
-    await user.click(
-      screen.getByRole("button", { name: "Refresh Kalshi quote" }),
-    );
-    await user.click(
-      await screen.findByRole("button", { name: "Sell 4 NO @ 48¢" }),
+      screen.getByRole("button", { name: "Dismiss bracket alert" }),
     );
     expect(
-      screen.getByText(/Confirm Sell NO 4 @ 48¢ \(\$1\.92\)/),
-    ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    await waitFor(() => {
-      expect(placeOrderMock).toHaveBeenCalledWith({
-        ticker: "KXBTC15M-26NOV191345-45",
-        action: "sell_no",
-        count: 4,
-        limitPriceDollars: 0.48,
-        exchangeIndex: 2,
-      });
-    });
-  });
+      screen.queryByText("Take Profit hit: sold 4.00 NO @ 65¢."),
+    ).toBeNull();
 
-  test("reports 0-fill IOC misses on instant buys and warns on live bid drift before confirming Sell", async () => {
-    const user = userEvent.setup();
-    let current = makeSnapshot({
-      connected: true,
-      maskedApiKeyId: "abcd...wxyz",
-      maxOrderDollars: 25,
-      balance: {
-        balanceDollars: 100,
-        portfolioValueDollars: 100,
-        updatedAt: Date.now(),
-      },
-      position: {
+    const tpInput = screen.getByLabelText(
+      "Take Profit (¢)",
+    ) as HTMLInputElement;
+    const slInput = screen.getByLabelText("Stop Loss (¢)") as HTMLInputElement;
+    expect(tpInput.value).toBe("82");
+    expect(slInput.value).toBe("40");
+
+    await user.clear(tpInput);
+    await user.type(tpInput, "85");
+    await user.clear(slInput);
+    await user.type(slInput, "45");
+    await user.click(screen.getByRole("button", { name: "Save TP/SL" }));
+
+    await waitFor(() => {
+      expect(setBracketMock).toHaveBeenCalledWith({
         ticker: "KXBTC15M-26NOV191330-30",
         side: "yes",
-        contracts: 5,
-        costBasisDollars: 3,
-        realizedPnlDollars: 0,
-        feesPaidDollars: 0.05,
-        exitBidDollars: 0.72,
-        exitProceedsDollars: 3.6,
-        estimatedPnlDollars: 0.6,
-      },
-    });
-
-    const placeOrderMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        order: {
-          orderId: "ord-miss-1",
-          clientOrderId: "cid-miss-1",
-          fillCount: "0.00",
-          remainingCount: "5.00",
-          averageFillPrice: null,
-          averageFeePaid: null,
-          timestampMs: Date.now(),
-        },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        order: {
-          orderId: "ord-fill-2",
-          clientOrderId: "cid-fill-2",
-          fillCount: "5.00",
-          remainingCount: "0.00",
-          averageFillPrice: 0.86,
-          averageFeePaid: 0.04,
-          timestampMs: Date.now(),
-        },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        order: {
-          orderId: "ord-sell-drift",
-          clientOrderId: "cid-sell-drift",
-          fillCount: "5.00",
-          remainingCount: "0.00",
-          averageFillPrice: 0.68,
-          averageFeePaid: 0.03,
-          timestampMs: Date.now(),
-        },
-      });
-
-    renderPanel({
-      snapshot: async () => current,
-      placeOrder: placeOrderMock,
-    });
-
-    await user.click(screen.getByRole("button", { name: "5" }));
-    await user.click(
-      await screen.findByRole("button", { name: /Buy YES \(81¢\)/ }),
-    );
-    expect(
-      await screen.findByText(
-        "Buy YES: 0 filled — live price moved past your 81¢ limit.",
-      ),
-    ).toBeTruthy();
-
-    current = {
-      ...current,
-      market: {
-        ...current.market!,
-        yesAskDollars: 0.86,
-      },
-      updatedAt: Date.now(),
-    };
-    await user.click(
-      screen.getByRole("button", { name: "Refresh Kalshi quote" }),
-    );
-    await user.click(
-      await screen.findByRole("button", { name: /Buy YES \(86¢\)/ }),
-    );
-    await waitFor(() => {
-      expect(placeOrderMock).toHaveBeenNthCalledWith(2, {
-        ticker: "KXBTC15M-26NOV191330-30",
-        action: "buy_yes",
-        count: 5,
-        limitPriceDollars: 0.86,
+        takeProfitDollars: 0.85,
+        stopLossDollars: 0.45,
         exchangeIndex: 2,
       });
     });
-    expect(
-      await screen.findByText("Buy YES: 5.00/5 filled @ 86¢ (ord-fill-2)."),
-    ).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Sell 5 YES @ 72¢" }));
-    expect(
-      screen.getByText("IOC limit: won't fill worse than 72¢."),
-    ).toBeTruthy();
-
-    current = {
-      ...current,
-      market: {
-        ...current.market!,
-        yesBidDollars: 0.68,
-      },
-      position: {
-        ...current.position!,
-        exitBidDollars: 0.68,
-        exitProceedsDollars: 3.4,
-        estimatedPnlDollars: 0.4,
-      },
-      updatedAt: Date.now(),
-    };
-    await user.click(
-      screen.getByRole("button", { name: "Refresh Kalshi quote" }),
-    );
-    await user.click(
-      await screen.findByRole("button", { name: "Update to 68¢" }),
-    );
-    expect(
-      screen.getByText(/Confirm Sell YES 5 @ 68¢ \(\$3\.40\)/),
-    ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-
+    await user.click(await screen.findByRole("button", { name: "Clear" }));
     await waitFor(() => {
-      expect(placeOrderMock).toHaveBeenLastCalledWith({
+      expect(clearBracketMock).toHaveBeenCalledWith({
+        ticker: "KXBTC15M-26NOV191330-30",
+      });
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sell 10 YES @ 72¢" }));
+    expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+    await waitFor(() => {
+      expect(placeOrderMock).toHaveBeenCalledWith({
         ticker: "KXBTC15M-26NOV191330-30",
         action: "sell_yes",
-        count: 5,
-        limitPriceDollars: 0.68,
+        count: 10,
+        limitPriceDollars: 0.72,
         exchangeIndex: 2,
+        takeProfitOffsetCents: undefined,
+        stopLossOffsetCents: undefined,
       });
     });
     expect(
       await screen.findByText(
-        "Sell YES: 5.00/5 filled @ 68¢ (ord-sell-drift).",
+        "Sell YES: 10.00/10 filled @ 72¢ (ord-sell-now).",
       ),
     ).toBeTruthy();
   });

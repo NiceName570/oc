@@ -4,6 +4,12 @@ import { trpc } from "@openchart/server/lib/trpc";
 import { Schema } from "effect";
 
 import {
+  computeAutoBracketTargets,
+  createBracketMonitor,
+  type KalshiBracketEvent,
+  type KalshiBracketRule,
+} from "./bracket-monitor";
+import {
   createOrderV2,
   fetchActiveBtc15mMarket,
   fetchBalance,
@@ -53,6 +59,22 @@ const placeOrderInput = Schema.Struct({
   count: Schema.Number,
   limitPriceDollars: Schema.Number,
   exchangeIndex: Schema.optional(Schema.Number),
+  takeProfitOffsetCents: Schema.optional(Schema.Number),
+  stopLossOffsetCents: Schema.optional(Schema.Number),
+});
+
+const bracketSideSchema = Schema.Literals(["yes", "no"]);
+
+const setBracketInput = Schema.Struct({
+  ticker: Schema.String,
+  side: bracketSideSchema,
+  takeProfitDollars: Schema.Union([Schema.Number, Schema.Null]),
+  stopLossDollars: Schema.Union([Schema.Number, Schema.Null]),
+  exchangeIndex: Schema.optional(Schema.Number),
+});
+
+const clearBracketInput = Schema.Struct({
+  ticker: Schema.optional(Schema.String),
 });
 
 /** Public snapshot returned to the Kalshi widget without exposing secrets. */
@@ -66,6 +88,8 @@ export interface KalshiSnapshot {
   readonly distancePercent: number | null;
   readonly balance: KalshiBalanceSnapshot | null;
   readonly position: (KalshiMarketPosition & KalshiPositionPnl) | null;
+  readonly bracket: KalshiBracketRule | null;
+  readonly lastBracketEvent: KalshiBracketEvent | null;
   readonly marketError: string | null;
   readonly accountError: string | null;
   readonly updatedAt: number;
@@ -75,6 +99,7 @@ export interface KalshiSnapshot {
 export interface KalshiRouterOptions {
   readonly fetchImpl?: typeof fetch;
   readonly balanceCacheTtlMs?: number;
+  readonly bracketPollIntervalMs?: number;
 }
 
 function safeErrorMessage(error: unknown): string {
@@ -103,6 +128,12 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
   const invalidateBalanceCache = () => {
     cachedBalance = undefined;
   };
+
+  const bracketMonitor = createBracketMonitor({
+    fetchImpl,
+    pollIntervalMs: options?.bracketPollIntervalMs,
+    onOrderExecuted: invalidateBalanceCache,
+  });
 
   return trpc.router({
     status: trpc.procedure.query(async ({ ctx }) => {
@@ -177,6 +208,7 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
       }),
 
     disconnect: trpc.procedure.mutation(async ({ ctx }) => {
+      bracketMonitor.clearAll();
       invalidateBalanceCache();
       await ctx.runtime.runPromise(clearKalshiCredentials);
       return { ok: true as const };
@@ -302,6 +334,8 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
               ...openPos,
               ...pnl,
             };
+          } else if (market) {
+            bracketMonitor.clearRule(market.ticker);
           }
         } else {
           accountErrors.push(safeErrorMessage(positionResult.reason));
@@ -322,6 +356,8 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
         distancePercent,
         balance,
         position,
+        bracket: market ? bracketMonitor.getRule(market.ticker) : null,
+        lastBracketEvent: bracketMonitor.getLastEvent(),
         marketError: marketErrors.length > 0 ? marketErrors.join(" • ") : null,
         accountError,
         updatedAt: Date.now(),
@@ -335,7 +371,11 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
           ctx,
           input,
         }): Promise<
-          | { readonly ok: true; readonly order: KalshiOrderResult }
+          | {
+              readonly ok: true;
+              readonly order: KalshiOrderResult;
+              readonly bracket: KalshiBracketRule | null;
+            }
           | { readonly ok: false; readonly error: string }
         > => {
           const stored = await ctx.runtime.runPromise(readKalshiCredentials);
@@ -346,10 +386,11 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
             };
           }
 
+          const ticker = input.ticker.trim();
           try {
             const order = await createOrderV2({
               credentials: stored,
-              ticker: input.ticker.trim(),
+              ticker,
               action: input.action,
               count: input.count,
               limitPriceDollars: input.limitPriceDollars,
@@ -358,7 +399,52 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
               fetchImpl,
             });
             invalidateBalanceCache();
-            return { ok: true, order };
+
+            const fillNum = Number(order.fillCount);
+            const remainingNum = Number(order.remainingCount);
+            if (
+              (input.action === "buy_yes" || input.action === "buy_no") &&
+              Number.isFinite(fillNum) &&
+              fillNum > 0 &&
+              ((input.takeProfitOffsetCents ?? 0) > 0 ||
+                (input.stopLossOffsetCents ?? 0) > 0)
+            ) {
+              const side: "yes" | "no" =
+                input.action === "buy_yes" ? "yes" : "no";
+              const entryPriceDollars =
+                order.averageFillPrice !== null
+                  ? side === "no"
+                    ? 1 - order.averageFillPrice
+                    : order.averageFillPrice
+                  : input.limitPriceDollars;
+              const targets = computeAutoBracketTargets({
+                entryPriceDollars,
+                takeProfitOffsetCents: input.takeProfitOffsetCents,
+                stopLossOffsetCents: input.stopLossOffsetCents,
+              });
+              if (
+                targets.takeProfitDollars !== null ||
+                targets.stopLossDollars !== null
+              ) {
+                bracketMonitor.setRule({
+                  runtime: ctx.runtime,
+                  ticker,
+                  side,
+                  takeProfitDollars: targets.takeProfitDollars,
+                  stopLossDollars: targets.stopLossDollars,
+                  exchangeIndex: input.exchangeIndex,
+                });
+              }
+            } else if (
+              (input.action === "sell_yes" || input.action === "sell_no") &&
+              Number.isFinite(fillNum) &&
+              fillNum > 0 &&
+              (!Number.isFinite(remainingNum) || remainingNum <= 1e-6)
+            ) {
+              bracketMonitor.clearRule(ticker);
+            }
+
+            return { ok: true, order, bracket: bracketMonitor.getRule(ticker) };
           } catch (error) {
             return {
               ok: false,
@@ -367,6 +453,46 @@ export function createKalshiRouter(options?: KalshiRouterOptions) {
           }
         },
       ),
+
+    setBracket: trpc.procedure
+      .input(Schema.toStandardSchemaV1(setBracketInput, { parseOptions }))
+      .mutation(
+        async ({
+          ctx,
+          input,
+        }): Promise<
+          | { readonly ok: true; readonly bracket: KalshiBracketRule | null }
+          | { readonly ok: false; readonly error: string }
+        > => {
+          const stored = await ctx.runtime.runPromise(readKalshiCredentials);
+          if (!stored) {
+            return {
+              ok: false,
+              error: "Connect your Kalshi API credentials first.",
+            };
+          }
+          try {
+            const bracket = bracketMonitor.setRule({
+              runtime: ctx.runtime,
+              ticker: input.ticker.trim(),
+              side: input.side,
+              takeProfitDollars: input.takeProfitDollars,
+              stopLossDollars: input.stopLossDollars,
+              exchangeIndex: input.exchangeIndex,
+            });
+            return { ok: true, bracket };
+          } catch (error) {
+            return { ok: false, error: safeErrorMessage(error) };
+          }
+        },
+      ),
+
+    clearBracket: trpc.procedure
+      .input(Schema.toStandardSchemaV1(clearBracketInput, { parseOptions }))
+      .mutation(async ({ input }) => {
+        bracketMonitor.clearRule(input.ticker?.trim());
+        return { ok: true as const };
+      }),
   });
 }
 

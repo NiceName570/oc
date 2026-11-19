@@ -260,4 +260,139 @@ describe("kalshi tRPC router", () => {
       maxOrderDollars: 25,
     });
   });
+
+  test("auto-arms TP/SL on buy with offsets, adjusts via setBracket, and clears via clearBracket/disconnect", async () => {
+    const runtime = createTestRuntime();
+    runtimes.push(runtime);
+    const { privateKey } = crypto.generateKeyPairSync("ed25519");
+    const validPem = privateKey
+      .export({ format: "pem", type: "pkcs8" })
+      .toString();
+
+    let hasPosition = true;
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/markets?")) {
+        return jsonResponse({
+          markets: [
+            {
+              ticker: "KXBTC15M-26NOV191715-15",
+              event_ticker: "KXBTC15M-26NOV191715",
+              title: "BTC 15m up or down",
+              status: "active",
+              open_time: "2026-11-19T22:00:00Z",
+              close_time: "2099-11-19T22:15:00Z",
+              floor_strike: 62500,
+              exchange_index: 2,
+              yes_bid_dollars: "0.5800",
+              yes_ask_dollars: "0.6000",
+              no_bid_dollars: "0.4000",
+              no_ask_dollars: "0.4200",
+              last_price_dollars: "0.5900",
+            },
+          ],
+        });
+      }
+      if (url.includes("coinbase.com")) {
+        return jsonResponse({ data: { amount: "62540.00" } });
+      }
+      if (url.includes("/portfolio/balance")) {
+        return jsonResponse({
+          balance_dollars: "200.00",
+          portfolio_value_dollars: "200.00",
+          updated_ts: 1763590000,
+        });
+      }
+      if (url.includes("/portfolio/positions")) {
+        return jsonResponse({
+          market_positions: hasPosition
+            ? [
+                {
+                  ticker: "KXBTC15M-26NOV191715-15",
+                  position_fp: "5.00",
+                  market_exposure_dollars: "3.00",
+                  realized_pnl_dollars: "0.00",
+                  fees_paid_dollars: "0.02",
+                },
+              ]
+            : [],
+        });
+      }
+      if (url.includes("/portfolio/events/orders")) {
+        return jsonResponse({
+          order_id: "ord-auto-1",
+          client_order_id: "cid-auto-1",
+          fill_count: "5.00",
+          remaining_count: "0.00",
+          average_fill_price: "0.6000",
+          average_fee_paid: "0.0200",
+          ts_ms: 1763590001000,
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+
+    const caller = createKalshiRouter({
+      fetchImpl,
+      bracketPollIntervalMs: 0,
+    }).createCaller({ runtime });
+
+    await caller.connect({
+      apiKeyId: "abcd-1234-wxyz",
+      privateKeyPem: validPem,
+      maxOrderDollars: 25,
+    });
+
+    const buyRes = await caller.placeOrder({
+      ticker: "KXBTC15M-26NOV191715-15",
+      action: "buy_yes",
+      count: 5,
+      limitPriceDollars: 0.6,
+      exchangeIndex: 2,
+      takeProfitOffsetCents: 15,
+      stopLossOffsetCents: 10,
+    });
+    expect(buyRes.ok).toBe(true);
+    if (buyRes.ok) {
+      expect(buyRes.bracket).toMatchObject({
+        ticker: "KXBTC15M-26NOV191715-15",
+        side: "yes",
+        takeProfitDollars: 0.75,
+        stopLossDollars: 0.5,
+      });
+    }
+
+    const updated = await caller.setBracket({
+      ticker: "KXBTC15M-26NOV191715-15",
+      side: "yes",
+      takeProfitDollars: 0.82,
+      stopLossDollars: 0.48,
+      exchangeIndex: 2,
+    });
+    expect(updated).toMatchObject({
+      ok: true,
+      bracket: {
+        takeProfitDollars: 0.82,
+        stopLossDollars: 0.48,
+      },
+    });
+
+    const snap = await caller.snapshot();
+    expect(snap.bracket).toMatchObject({
+      takeProfitDollars: 0.82,
+      stopLossDollars: 0.48,
+    });
+
+    await caller.clearBracket({ ticker: "KXBTC15M-26NOV191715-15" });
+    expect((await caller.snapshot()).bracket).toBeNull();
+
+    await caller.setBracket({
+      ticker: "KXBTC15M-26NOV191715-15",
+      side: "yes",
+      takeProfitDollars: 0.8,
+      stopLossDollars: null,
+    });
+    hasPosition = false;
+    expect((await caller.snapshot()).bracket).toBeNull();
+  });
 });

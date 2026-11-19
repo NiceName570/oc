@@ -65,6 +65,8 @@ describe("KalshiSidePanel & KalshiTrigger", () => {
       distancePercent: -0.0591,
       balance: null,
       position: null,
+      bracket: null,
+      lastBracketEvent: null,
       marketError: null,
       accountError: null,
       updatedAt: Date.now(),

@@ -16,16 +16,7 @@ type KalshiSnapshot = Awaited<
   ReturnType<AppTransport["rpc"]["kalshi"]["snapshot"]["query"]>
 >;
 type KalshiOrderAction = "buy_yes" | "buy_no" | "sell_yes" | "sell_no";
-
-interface PendingOrder {
-  readonly ticker: string;
-  readonly action: KalshiOrderAction;
-  readonly count: number;
-  readonly limitPriceDollars: number;
-  readonly exchangeIndex?: number;
-  readonly sideLabel: string;
-  readonly estimatedDollars: number;
-}
+type OrderSizeMode = "dollars" | "shares";
 
 interface OrderBanner {
   readonly tone: "success" | "error";
@@ -33,7 +24,8 @@ interface OrderBanner {
 }
 
 const SNAPSHOT_QUERY_KEY = ["kalshi", "snapshot"] as const;
-const CONTRACT_PRESETS = [1, 5, 10] as const;
+const DOLLAR_PRESETS = [5, 10, 25] as const;
+const SHARE_PRESETS = [1, 5, 10] as const;
 
 function formatUsd(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
@@ -94,7 +86,7 @@ function formatCountdown(
   };
 }
 
-/** Compact live trading panel for Kalshi `KXBTC15M` contracts with distance-to-strike readout, always-visible Buy YES/NO ticket, confirm-gated execution, live exit P&L sells, and inline credential setup. @example <KalshiTradePanel transport={transport} onClose={() => setOpen(false)} /> */
+/** Compact live trading panel for Kalshi `KXBTC15M` contracts with 1-click buys/sells, Dollars/Shares sizing, live strike distance, and auto TP/SL brackets. @example <KalshiTradePanel transport={transport} onClose={() => setOpen(false)} /> */
 export function KalshiTradePanel({
   transport: propTransport,
   visible = true,
@@ -123,8 +115,16 @@ export function KalshiTradePanel({
   const [capDraft, setCapDraft] = useState("25");
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
-  const [contractCountRaw, setContractCountRaw] = useState("1");
-  const [pendingOrder, setPendingOrder] = useState<PendingOrder | null>(null);
+  const [sizeMode, setSizeMode] = useState<OrderSizeMode>("dollars");
+  const [amountRaw, setAmountRaw] = useState("5");
+  const [autoTpOffsetRaw, setAutoTpOffsetRaw] = useState("");
+  const [autoSlOffsetRaw, setAutoSlOffsetRaw] = useState("");
+
+  const [tpCentsDraft, setTpCentsDraft] = useState("");
+  const [slCentsDraft, setSlCentsDraft] = useState("");
+  const [bracketError, setBracketError] = useState<string | null>(null);
+  const [dismissedEventTs, setDismissedEventTs] = useState<number | null>(null);
+
   const [orderBanner, setOrderBanner] = useState<OrderBanner | null>(null);
 
   useEffect(() => {
@@ -148,6 +148,8 @@ export function KalshiTradePanel({
   const maxOrderDollars = snapshotMaxOrderDollars ?? 25;
   const market = snapshot?.market ?? null;
   const position = snapshot?.position ?? null;
+  const bracket = snapshot?.bracket ?? null;
+  const lastBracketEvent = snapshot?.lastBracketEvent ?? null;
 
   useEffect(() => {
     if (snapshotMaxOrderDollars !== undefined) {
@@ -155,11 +157,40 @@ export function KalshiTradePanel({
     }
   }, [snapshotMaxOrderDollars]);
 
+  const bracketTicker = bracket?.ticker;
+  const bracketSide = bracket?.side;
+  const bracketTpDollars = bracket?.takeProfitDollars ?? null;
+  const bracketSlDollars = bracket?.stopLossDollars ?? null;
+  const bracketUpdatedAt = bracket?.updatedAt;
+  const posTicker = position?.ticker;
+  const posSide = position?.side;
+
   useEffect(() => {
-    if (pendingOrder && market?.ticker !== pendingOrder.ticker) {
-      setPendingOrder(null);
+    setBracketError(null);
+    if (bracketTicker !== undefined) {
+      setTpCentsDraft(
+        bracketTpDollars !== null
+          ? String(Math.round(bracketTpDollars * 100))
+          : "",
+      );
+      setSlCentsDraft(
+        bracketSlDollars !== null
+          ? String(Math.round(bracketSlDollars * 100))
+          : "",
+      );
+    } else {
+      setTpCentsDraft("");
+      setSlCentsDraft("");
     }
-  }, [market?.ticker, pendingOrder]);
+  }, [
+    bracketTicker,
+    bracketSide,
+    bracketTpDollars,
+    bracketSlDollars,
+    bracketUpdatedAt,
+    posTicker,
+    posSide,
+  ]);
 
   const connectMutation = useMutation({
     mutationFn: (input: {
@@ -212,7 +243,7 @@ export function KalshiTradePanel({
     mutationFn: () => transport.rpc.kalshi.disconnect.mutate(),
     onSuccess: async () => {
       setSettingsError(null);
-      setPendingOrder(null);
+      setBracketError(null);
       setReplacingKey(false);
       setSettingsOpen(false);
       setOrderBanner(null);
@@ -224,16 +255,26 @@ export function KalshiTradePanel({
   });
 
   const placeOrderMutation = useMutation({
-    mutationFn: (order: PendingOrder) =>
+    mutationFn: (input: {
+      readonly ticker: string;
+      readonly action: KalshiOrderAction;
+      readonly count: number;
+      readonly limitPriceDollars: number;
+      readonly exchangeIndex?: number;
+      readonly sideLabel: string;
+      readonly takeProfitOffsetCents?: number;
+      readonly stopLossOffsetCents?: number;
+    }) =>
       transport.rpc.kalshi.placeOrder.mutate({
-        ticker: order.ticker,
-        action: order.action,
-        count: order.count,
-        limitPriceDollars: order.limitPriceDollars,
-        exchangeIndex: order.exchangeIndex,
+        ticker: input.ticker,
+        action: input.action,
+        count: input.count,
+        limitPriceDollars: input.limitPriceDollars,
+        exchangeIndex: input.exchangeIndex,
+        takeProfitOffsetCents: input.takeProfitOffsetCents,
+        stopLossOffsetCents: input.stopLossOffsetCents,
       }),
     onSuccess: async (result, order) => {
-      setPendingOrder(null);
       if (!result.ok) {
         setOrderBanner({ tone: "error", text: result.error });
         return;
@@ -251,19 +292,31 @@ export function KalshiTradePanel({
               ? 1 - result.order.averageFillPrice
               : result.order.averageFillPrice
             : null;
+        const bracketParts: string[] = [];
+        if (result.bracket?.takeProfitDollars != null) {
+          bracketParts.push(
+            `TP ${formatCents(result.bracket.takeProfitDollars)}`,
+          );
+        }
+        if (result.bracket?.stopLossDollars != null) {
+          bracketParts.push(
+            `SL ${formatCents(result.bracket.stopLossDollars)}`,
+          );
+        }
+        const bracketSuffix =
+          bracketParts.length > 0 ? ` • ${bracketParts.join(" / ")} armed` : "";
         setOrderBanner({
           tone: "success",
           text: `${order.sideLabel}: ${result.order.fillCount}/${order.count} filled${
             effectiveFillPrice !== null
               ? ` @ ${formatCents(effectiveFillPrice)}`
               : ""
-          } (${result.order.orderId || "submitted"}).`,
+          } (${result.order.orderId || "submitted"})${bracketSuffix}.`,
         });
       }
       await queryClient.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
     },
     onError: (err) => {
-      setPendingOrder(null);
       setOrderBanner({
         tone: "error",
         text: err instanceof Error ? err.message : String(err),
@@ -271,56 +324,98 @@ export function KalshiTradePanel({
     },
   });
 
+  const setBracketMutation = useMutation({
+    mutationFn: (input: {
+      readonly ticker: string;
+      readonly side: "yes" | "no";
+      readonly takeProfitDollars: number | null;
+      readonly stopLossDollars: number | null;
+      readonly exchangeIndex?: number;
+    }) => transport.rpc.kalshi.setBracket.mutate(input),
+    onSuccess: async (result) => {
+      if (!result.ok) {
+        setBracketError(result.error);
+        return;
+      }
+      setBracketError(null);
+      await queryClient.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
+    },
+    onError: (err) => {
+      setBracketError(err instanceof Error ? err.message : String(err));
+    },
+  });
+
+  const clearBracketMutation = useMutation({
+    mutationFn: (ticker?: string) =>
+      transport.rpc.kalshi.clearBracket.mutate({ ticker }),
+    onSuccess: async () => {
+      setBracketError(null);
+      await queryClient.invalidateQueries({ queryKey: SNAPSHOT_QUERY_KEY });
+    },
+    onError: (err) => {
+      setBracketError(err instanceof Error ? err.message : String(err));
+    },
+  });
+
   const countdown = formatCountdown(market?.closeTime, nowMs);
-  const parsedCount = Number(contractCountRaw);
-  const validCount =
-    Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 0;
+  const parsedAmount = Number(amountRaw);
+  const validAmount =
+    Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : 0;
 
   const yesAsk = market?.yesAskDollars ?? null;
   const noAsk = market?.noAskDollars ?? null;
+
+  const yesContracts =
+    sizeMode === "dollars"
+      ? yesAsk !== null && yesAsk > 0 && validAmount > 0
+        ? Math.floor((validAmount + 1e-9) / yesAsk)
+        : 0
+      : validAmount;
+
+  const noContracts =
+    sizeMode === "dollars"
+      ? noAsk !== null && noAsk > 0 && validAmount > 0
+        ? Math.floor((validAmount + 1e-9) / noAsk)
+        : 0
+      : validAmount;
+
   const yesBuyCost =
-    yesAsk !== null && validCount > 0
-      ? Number((validCount * yesAsk).toFixed(2))
+    yesAsk !== null && yesContracts > 0
+      ? Number((yesContracts * yesAsk).toFixed(2))
       : null;
   const noBuyCost =
-    noAsk !== null && validCount > 0
-      ? Number((validCount * noAsk).toFixed(2))
+    noAsk !== null && noContracts > 0
+      ? Number((noContracts * noAsk).toFixed(2))
       : null;
 
-  const yesOverCap = yesBuyCost !== null && yesBuyCost > maxOrderDollars + 1e-9;
-  const noOverCap = noBuyCost !== null && noBuyCost > maxOrderDollars + 1e-9;
+  const yesOverCap =
+    sizeMode === "dollars"
+      ? validAmount > maxOrderDollars + 1e-9 ||
+        (yesBuyCost !== null && yesBuyCost > maxOrderDollars + 1e-9)
+      : yesBuyCost !== null && yesBuyCost > maxOrderDollars + 1e-9;
+
+  const noOverCap =
+    sizeMode === "dollars"
+      ? validAmount > maxOrderDollars + 1e-9 ||
+        (noBuyCost !== null && noBuyCost > maxOrderDollars + 1e-9)
+      : noBuyCost !== null && noBuyCost > maxOrderDollars + 1e-9;
 
   const quoteAgeSec = snapshot
     ? Math.max(0, Math.floor((nowMs - snapshot.updatedAt) / 1000))
     : null;
 
-  const livePendingPriceDollars = pendingOrder
-    ? pendingOrder.action === "buy_yes"
-      ? (market?.yesAskDollars ?? null)
-      : pendingOrder.action === "buy_no"
-        ? (market?.noAskDollars ?? null)
-        : pendingOrder.action === "sell_yes"
-          ? (market?.yesBidDollars ?? null)
-          : (market?.noBidDollars ?? null)
-    : null;
-
-  const pendingPriceMoved =
-    pendingOrder !== null &&
-    livePendingPriceDollars !== null &&
-    Math.abs(livePendingPriceDollars - pendingOrder.limitPriceDollars) >=
-      0.0005;
-
   const showSetupCard =
     !snapshotQuery.isPending && (!connected || settingsOpen);
 
-  const stageOrder = (
+  const presets = sizeMode === "dollars" ? DOLLAR_PRESETS : SHARE_PRESETS;
+
+  const submitOrder = (
     action: KalshiOrderAction,
     priceDollars: number | null,
     count: number,
     sideLabel: string,
   ) => {
     if (!connected) {
-      setPendingOrder(null);
       setSettingsOpen(true);
       setOrderBanner({
         tone: "error",
@@ -340,22 +435,75 @@ export function KalshiTradePanel({
       });
       return;
     }
-    const order: PendingOrder = {
+
+    const tpOffsetNum = Number(autoTpOffsetRaw);
+    const slOffsetNum = Number(autoSlOffsetRaw);
+    const takeProfitOffsetCents =
+      (action === "buy_yes" || action === "buy_no") &&
+      autoTpOffsetRaw.trim() !== "" &&
+      Number.isFinite(tpOffsetNum) &&
+      tpOffsetNum > 0
+        ? tpOffsetNum
+        : undefined;
+    const stopLossOffsetCents =
+      (action === "buy_yes" || action === "buy_no") &&
+      autoSlOffsetRaw.trim() !== "" &&
+      Number.isFinite(slOffsetNum) &&
+      slOffsetNum > 0
+        ? slOffsetNum
+        : undefined;
+
+    setOrderBanner(null);
+    placeOrderMutation.mutate({
       ticker: market.ticker,
       action,
       count,
       limitPriceDollars: priceDollars,
       exchangeIndex: market.exchangeIndex,
       sideLabel,
-      estimatedDollars,
+      takeProfitOffsetCents,
+      stopLossOffsetCents,
+    });
+  };
+
+  const handleSaveBracketSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!position) return;
+
+    const parseOptionalCents = (raw: string, label: string): number | null => {
+      const trimmed = raw.trim();
+      if (trimmed === "") return null;
+      const num = Number(trimmed);
+      if (!Number.isFinite(num) || num < 1 || num > 99) {
+        throw new Error(`${label} must be between 1¢ and 99¢.`);
+      }
+      return Number((num / 100).toFixed(4));
     };
-    setOrderBanner(null);
-    if (action === "buy_yes" || action === "buy_no") {
-      setPendingOrder(null);
-      placeOrderMutation.mutate(order);
-      return;
+
+    try {
+      const takeProfitDollars = parseOptionalCents(tpCentsDraft, "Take profit");
+      const stopLossDollars = parseOptionalCents(slCentsDraft, "Stop loss");
+      if (
+        takeProfitDollars !== null &&
+        stopLossDollars !== null &&
+        stopLossDollars >= takeProfitDollars
+      ) {
+        setBracketError("Stop loss must be lower than take profit.");
+        return;
+      }
+      setBracketError(null);
+      setBracketMutation.mutate({
+        ticker: position.ticker,
+        side: position.side,
+        takeProfitDollars,
+        stopLossDollars,
+        exchangeIndex: market?.exchangeIndex,
+      });
+    } catch (error) {
+      setBracketError(
+        error instanceof Error ? error.message : "Invalid TP/SL values.",
+      );
     }
-    setPendingOrder(order);
   };
 
   const handleConnectSubmit = (event: React.FormEvent) => {
@@ -383,6 +531,51 @@ export function KalshiTradePanel({
     setSettingsError(null);
     updateCapMutation.mutate(parsedCap);
   };
+
+  const parsedTpDraftNum = Number(tpCentsDraft);
+  const parsedSlDraftNum = Number(slCentsDraft);
+  const projectedTpPnl =
+    position &&
+    tpCentsDraft.trim() !== "" &&
+    Number.isFinite(parsedTpDraftNum) &&
+    parsedTpDraftNum >= 1 &&
+    parsedTpDraftNum <= 99
+      ? Number(
+          (
+            position.contracts * (parsedTpDraftNum / 100) -
+            position.costBasisDollars
+          ).toFixed(2),
+        )
+      : null;
+  const projectedSlPnl =
+    position &&
+    slCentsDraft.trim() !== "" &&
+    Number.isFinite(parsedSlDraftNum) &&
+    parsedSlDraftNum >= 1 &&
+    parsedSlDraftNum <= 99
+      ? Number(
+          (
+            position.contracts * (parsedSlDraftNum / 100) -
+            position.costBasisDollars
+          ).toFixed(2),
+        )
+      : null;
+
+  const isBuyingYes =
+    placeOrderMutation.isPending &&
+    placeOrderMutation.variables?.action === "buy_yes";
+  const isBuyingNo =
+    placeOrderMutation.isPending &&
+    placeOrderMutation.variables?.action === "buy_no";
+  const isSelling =
+    placeOrderMutation.isPending &&
+    (placeOrderMutation.variables?.action === "sell_yes" ||
+      placeOrderMutation.variables?.action === "sell_no");
+
+  const visibleBracketEvent =
+    lastBracketEvent && lastBracketEvent.timestampMs !== dismissedEventTs
+      ? lastBracketEvent
+      : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden text-xs">
@@ -554,44 +747,120 @@ export function KalshiTradePanel({
 
         <div className="flex flex-col gap-2 rounded-md border bg-card/40 p-2.5">
           <div className="flex items-center justify-between gap-2">
-            <label
-              htmlFor="kalshi-contract-count"
-              className="text-[11px] font-medium text-muted-foreground"
+            <div
+              role="group"
+              aria-label="Order sizing unit"
+              className="inline-flex rounded border bg-background p-0.5 text-[10px]"
             >
-              Contracts (cap {formatUsd(maxOrderDollars)})
-            </label>
+              <button
+                type="button"
+                aria-pressed={sizeMode === "dollars"}
+                onClick={() => setSizeMode("dollars")}
+                className={cn(
+                  "rounded-sm px-1.5 py-0.5 font-medium transition-colors",
+                  sizeMode === "dollars"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Dollars ($)
+              </button>
+              <button
+                type="button"
+                aria-pressed={sizeMode === "shares"}
+                onClick={() => setSizeMode("shares")}
+                className={cn(
+                  "rounded-sm px-1.5 py-0.5 font-medium transition-colors",
+                  sizeMode === "shares"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Shares
+              </button>
+            </div>
             <div className="flex items-center gap-1">
-              {CONTRACT_PRESETS.map((preset) => (
+              {presets.map((preset) => (
                 <button
                   key={preset}
                   type="button"
-                  onClick={() => setContractCountRaw(String(preset))}
+                  onClick={() => setAmountRaw(String(preset))}
                   className={cn(
                     "rounded border px-1.5 py-0.5 font-mono text-[10px] transition-colors",
-                    parsedCount === preset
+                    parsedAmount === preset
                       ? "border-primary bg-primary/15 text-foreground"
                       : "border-border text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {preset}
+                  {sizeMode === "dollars" ? `$${preset}` : preset}
                 </button>
               ))}
             </div>
           </div>
 
+          <div className="flex items-center justify-between gap-2">
+            <label
+              htmlFor="kalshi-order-amount"
+              className="text-[11px] text-muted-foreground"
+            >
+              {sizeMode === "dollars" ? "Risk Amount ($)" : "Shares"}
+            </label>
+            <span className="font-mono text-[10px] text-muted-foreground">
+              Cap {formatUsd(maxOrderDollars)}
+            </span>
+          </div>
+
           <Input
-            id="kalshi-contract-count"
-            aria-label="Contracts"
+            id="kalshi-order-amount"
+            aria-label={sizeMode === "dollars" ? "Amount ($)" : "Contracts"}
             type="number"
             min={1}
-            step="1"
+            step={sizeMode === "dollars" ? "0.5" : "1"}
             className="h-8 font-mono text-xs tabular-nums"
-            value={contractCountRaw}
-            onChange={(event) => {
-              setContractCountRaw(event.target.value);
-              setPendingOrder(null);
-            }}
+            value={amountRaw}
+            onChange={(event) => setAmountRaw(event.target.value)}
           />
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label
+                htmlFor="kalshi-auto-tp-offset"
+                className="mb-1 block text-[10px] text-muted-foreground"
+              >
+                Auto TP (+¢)
+              </label>
+              <Input
+                id="kalshi-auto-tp-offset"
+                type="number"
+                min={1}
+                max={98}
+                step="1"
+                placeholder="Off"
+                className="h-7 font-mono text-xs tabular-nums"
+                value={autoTpOffsetRaw}
+                onChange={(event) => setAutoTpOffsetRaw(event.target.value)}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="kalshi-auto-sl-offset"
+                className="mb-1 block text-[10px] text-muted-foreground"
+              >
+                Auto SL (-¢)
+              </label>
+              <Input
+                id="kalshi-auto-sl-offset"
+                type="number"
+                min={1}
+                max={98}
+                step="1"
+                placeholder="Off"
+                className="h-7 font-mono text-xs tabular-nums"
+                value={autoSlOffsetRaw}
+                onChange={(event) => setAutoSlOffsetRaw(event.target.value)}
+              />
+            </div>
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <Button
@@ -600,16 +869,15 @@ export function KalshiTradePanel({
               disabled={
                 !market ||
                 yesAsk === null ||
-                validCount <= 0 ||
+                yesContracts <= 0 ||
                 yesOverCap ||
                 placeOrderMutation.isPending
               }
               onClick={() =>
-                stageOrder("buy_yes", yesAsk, validCount, "Buy YES")
+                submitOrder("buy_yes", yesAsk, yesContracts, "Buy YES")
               }
             >
-              {placeOrderMutation.isPending &&
-              placeOrderMutation.variables?.action === "buy_yes"
+              {isBuyingYes
                 ? "Buying YES..."
                 : `Buy YES (${formatCents(yesAsk)})`}
             </Button>
@@ -619,96 +887,74 @@ export function KalshiTradePanel({
               disabled={
                 !market ||
                 noAsk === null ||
-                validCount <= 0 ||
+                noContracts <= 0 ||
                 noOverCap ||
                 placeOrderMutation.isPending
               }
-              onClick={() => stageOrder("buy_no", noAsk, validCount, "Buy NO")}
+              onClick={() =>
+                submitOrder("buy_no", noAsk, noContracts, "Buy NO")
+              }
             >
-              {placeOrderMutation.isPending &&
-              placeOrderMutation.variables?.action === "buy_no"
-                ? "Buying NO..."
-                : `Buy NO (${formatCents(noAsk)})`}
+              {isBuyingNo ? "Buying NO..." : `Buy NO (${formatCents(noAsk)})`}
             </Button>
           </div>
 
-          {(yesBuyCost !== null || noBuyCost !== null) && (
-            <div className="grid grid-cols-2 gap-2 text-center font-mono text-[10px] tabular-nums text-muted-foreground">
-              <span>
-                {yesBuyCost !== null ? `Est. ${formatUsd(yesBuyCost)}` : "—"}
-              </span>
-              <span>
-                {noBuyCost !== null ? `Est. ${formatUsd(noBuyCost)}` : "—"}
-              </span>
-            </div>
-          )}
+          <div className="grid grid-cols-2 gap-2 text-center font-mono text-[10px] tabular-nums text-muted-foreground">
+            <span>
+              {sizeMode === "dollars"
+                ? yesContracts > 0
+                  ? `${yesContracts} sh · ${formatUsd(yesBuyCost)}`
+                  : yesAsk !== null
+                    ? `Min ${formatUsd(yesAsk)}`
+                    : "—"
+                : yesBuyCost !== null
+                  ? `Est. ${formatUsd(yesBuyCost)}`
+                  : "—"}
+            </span>
+            <span>
+              {sizeMode === "dollars"
+                ? noContracts > 0
+                  ? `${noContracts} sh · ${formatUsd(noBuyCost)}`
+                  : noAsk !== null
+                    ? `Min ${formatUsd(noAsk)}`
+                    : "—"
+                : noBuyCost !== null
+                  ? `Est. ${formatUsd(noBuyCost)}`
+                  : "—"}
+            </span>
+          </div>
 
           {(yesOverCap || noOverCap) && (
             <div className="text-[11px] text-amber-600 dark:text-amber-400">
-              {yesOverCap && `YES order (${formatUsd(yesBuyCost)}) `}
-              {yesOverCap && noOverCap && "• "}
-              {noOverCap && `NO order (${formatUsd(noBuyCost)}) `}
-              exceeds {formatUsd(maxOrderDollars)} cap.
+              {sizeMode === "dollars" && validAmount > maxOrderDollars + 1e-9
+                ? `Amount (${formatUsd(validAmount)}) exceeds ${formatUsd(maxOrderDollars)} cap.`
+                : `${yesOverCap ? `YES order (${formatUsd(yesBuyCost)}) ` : ""}${yesOverCap && noOverCap ? "• " : ""}${noOverCap ? `NO order (${formatUsd(noBuyCost)}) ` : ""}exceeds ${formatUsd(maxOrderDollars)} cap.`}
             </div>
           )}
         </div>
 
-        {pendingOrder && (
-          <div className="flex flex-col gap-1.5 rounded-md border border-primary/50 bg-primary/10 p-2">
-            <div className="text-[11px] font-medium text-foreground">
-              Confirm {pendingOrder.sideLabel} {pendingOrder.count} @{" "}
-              {formatCents(pendingOrder.limitPriceDollars)} (
-              {formatUsd(pendingOrder.estimatedDollars)})
-            </div>
-            <div className="text-[10px] text-muted-foreground">
-              IOC limit: won&apos;t fill worse than{" "}
-              {formatCents(pendingOrder.limitPriceDollars)}.
-            </div>
-            {pendingPriceMoved && livePendingPriceDollars !== null && (
-              <div className="flex items-center justify-between gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-300">
-                <span>
-                  Live price moved to {formatCents(livePendingPriceDollars)}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  disabled={placeOrderMutation.isPending}
-                  onClick={() =>
-                    stageOrder(
-                      pendingOrder.action,
-                      livePendingPriceDollars,
-                      pendingOrder.count,
-                      pendingOrder.sideLabel,
-                    )
-                  }
-                >
-                  Update to {formatCents(livePendingPriceDollars)}
-                </Button>
-              </div>
+        {visibleBracketEvent && (
+          <div
+            className={cn(
+              "flex items-start justify-between gap-2 rounded-md border px-2.5 py-1.5 text-[11px]",
+              visibleBracketEvent.status === "filled"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : visibleBracketEvent.status === "closed"
+                  ? "border-border bg-muted/40 text-muted-foreground"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
             )}
-            <div className="flex items-center gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                className="h-7 flex-1 text-xs"
-                disabled={placeOrderMutation.isPending}
-                onClick={() => placeOrderMutation.mutate(pendingOrder)}
-              >
-                {placeOrderMutation.isPending ? "Submitting..." : "Confirm"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2.5 text-xs"
-                disabled={placeOrderMutation.isPending}
-                onClick={() => setPendingOrder(null)}
-              >
-                Cancel
-              </Button>
-            </div>
+          >
+            <span>{visibleBracketEvent.message}</span>
+            <button
+              type="button"
+              aria-label="Dismiss bracket alert"
+              className="shrink-0 rounded p-0.5 hover:bg-background/50"
+              onClick={() =>
+                setDismissedEventTs(visibleBracketEvent.timestampMs)
+              }
+            >
+              <XIcon className="size-3" />
+            </button>
           </div>
         )}
 
@@ -781,7 +1027,7 @@ export function KalshiTradePanel({
                 placeOrderMutation.isPending
               }
               onClick={() =>
-                stageOrder(
+                submitOrder(
                   position.side === "yes" ? "sell_yes" : "sell_no",
                   position.exitBidDollars,
                   position.contracts,
@@ -789,9 +1035,116 @@ export function KalshiTradePanel({
                 )
               }
             >
-              Sell {position.contracts} {position.side.toUpperCase()} @{" "}
-              {formatCents(position.exitBidDollars)}
+              {isSelling
+                ? "Selling..."
+                : `Sell ${position.contracts} ${position.side.toUpperCase()} @ ${formatCents(position.exitBidDollars)}`}
             </Button>
+
+            <form
+              onSubmit={handleSaveBracketSubmit}
+              className="flex flex-col gap-1.5 border-t pt-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-foreground">
+                  Auto Exit (TP / SL)
+                </span>
+                <Badge
+                  variant={bracket ? "secondary" : "outline"}
+                  className="text-[10px]"
+                >
+                  {bracket ? "Armed" : "Off"}
+                </Badge>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Active while OpenChart is open. Checked every 1s.
+              </p>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label
+                    htmlFor="kalshi-position-tp"
+                    className="mb-1 block text-[10px] text-muted-foreground"
+                  >
+                    Take Profit (¢)
+                  </label>
+                  <Input
+                    id="kalshi-position-tp"
+                    type="number"
+                    min={1}
+                    max={99}
+                    step="1"
+                    placeholder="Off"
+                    className="h-7 font-mono text-xs tabular-nums"
+                    value={tpCentsDraft}
+                    onChange={(event) => setTpCentsDraft(event.target.value)}
+                  />
+                  {projectedTpPnl !== null && (
+                    <div className="mt-0.5 font-mono text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400">
+                      Est. {formatSignedUsd(projectedTpPnl)}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label
+                    htmlFor="kalshi-position-sl"
+                    className="mb-1 block text-[10px] text-muted-foreground"
+                  >
+                    Stop Loss (¢)
+                  </label>
+                  <Input
+                    id="kalshi-position-sl"
+                    type="number"
+                    min={1}
+                    max={99}
+                    step="1"
+                    placeholder="Off"
+                    className="h-7 font-mono text-xs tabular-nums"
+                    value={slCentsDraft}
+                    onChange={(event) => setSlCentsDraft(event.target.value)}
+                  />
+                  {projectedSlPnl !== null && (
+                    <div className="mt-0.5 font-mono text-[10px] tabular-nums text-rose-600 dark:text-rose-400">
+                      Est. {formatSignedUsd(projectedSlPnl)}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {bracketError && (
+                <div className="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
+                  {bracketError}
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="h-7 flex-1 text-[11px]"
+                  disabled={
+                    setBracketMutation.isPending ||
+                    clearBracketMutation.isPending
+                  }
+                >
+                  {setBracketMutation.isPending ? "Saving..." : "Save TP/SL"}
+                </Button>
+                {bracket && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2.5 text-[11px]"
+                    disabled={
+                      clearBracketMutation.isPending ||
+                      setBracketMutation.isPending
+                    }
+                    onClick={() => clearBracketMutation.mutate(position.ticker)}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </form>
           </div>
         )}
 
@@ -888,8 +1241,8 @@ export function KalshiTradePanel({
                 className="flex flex-col gap-2"
               >
                 <p className="text-[11px] text-muted-foreground">
-                  Encrypted locally on this machine. Buy orders submit
-                  immediately up to your max cap.
+                  Encrypted locally on this machine. Orders submit immediately
+                  up to your max cap.
                 </p>
                 <div>
                   <label
