@@ -77,6 +77,7 @@ test.each([
   ["Chart", "chart"],
   ["Workspace", "workspace"],
   ["Watchlist", "watchlist"],
+  ["Kalshi 15m", "kalshi"],
 ] as const)(
   "adds %s with one selection and returns focus to the trigger",
   async (name, kind) => {
@@ -106,6 +107,7 @@ test.each([
   ["chart", "Chart"],
   ["workspace", "Workspace"],
   ["watchlist", "Watchlist"],
+  ["kalshi", "Kalshi 15m"],
 ])("disables %s when the dashboard already has one", async (kind, title) => {
   const { user, dashboard, refresh } = setup();
   refresh({
@@ -146,6 +148,7 @@ test("lists built-ins (Alerts stay in the sidebar), then saved custom widgets, a
     "Chart",
     "Workspace",
     "Watchlist",
+    "Kalshi 15m",
     "Rates heatmapCustom",
     "Open widgets/rates.widget.tsx in Workspace",
   ]);

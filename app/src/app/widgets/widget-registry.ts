@@ -10,6 +10,7 @@ import {
 } from "@openchart/app/features/watchlist/components/context";
 import { watchlistWidget } from "@openchart/app/features/watchlist/components/widget";
 import { workspaceWidget } from "@openchart/app/features/workspace/components/widget";
+import { kalshiWidget } from "@openchart/app/features/kalshi/components/widget";
 import type {
   WidgetDefinition,
   WidgetResolver,
@@ -70,6 +71,10 @@ export const widgetCatalog = {
   watchlist: {
     definition: { ...watchlistWidget, Provider: WatchlistProvider },
     description: "Track live prices and formulas in collapsible sections.",
+  },
+  kalshi: {
+    definition: kalshiWidget,
+    description: "Trade Kalshi 15-minute BTC contracts live.",
   },
 };
 

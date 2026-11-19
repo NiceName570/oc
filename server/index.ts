@@ -28,6 +28,7 @@ import { schedulerRouter } from "@openchart/server/scheduler/router";
 import { collectionRouter } from "@openchart/server/collection/router";
 import { monitoringRouter } from "@openchart/server/monitoring/router";
 import { proactiveRouter } from "@openchart/server/proactive/router";
+import { kalshiRouter } from "./kalshi/router";
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
 import { Schema } from "effect";
 import type { Context } from "./context";
@@ -57,6 +58,7 @@ export const router = trpc.router({
   proactive: proactiveRouter,
   models: modelsRouter,
   workspace: workspaceRouter,
+  kalshi: kalshiRouter,
   echo: trpc.procedure
     .input(
       Schema.toStandardSchemaV1(Schema.Struct({ message: Schema.String }), {
