@@ -12,6 +12,8 @@ export interface RuntimeArtifact {
    * installation strips; `flat` release archives keep entries at the root.
    */
   readonly layout: "npm" | "flat";
+  /** ZIP archives opt in; omitted means tar.gz and preserves existing install identities. */
+  readonly archive?: "zip";
   /** Path of the CLI inside the installed payload. */
   readonly executable: string;
   /**
@@ -27,57 +29,56 @@ export type RuntimeManifest<Id extends string> = Readonly<
 >;
 /**
  * Platform-specific pins. Update Claude SDK dependencies together with its artifacts.
- * Antigravity publishes GitHub release archives; Windows ships zip archives and
- * sign-in needs a POSIX pseudo-terminal, so it has no Windows pin. Grok's npm
- * platform packages ship the CLI Brotli-compressed.
+ * Antigravity publishes flat GitHub release archives, including ZIPs on Windows.
+ * Grok's npm platform packages ship the CLI Brotli-compressed.
  */
 export const PROVIDER_MANIFEST: RuntimeManifest<NativeProviderID> = {
   codex: {
     "darwin-arm64": {
-      version: "0.159.0",
-      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.159.0-darwin-arm64.tgz",
+      version: "0.170.0",
+      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-darwin-arm64.tgz",
       integrity:
-        "sha512-D1x+5n2y0TE43ERJs3CbBDRPLQl968hpqsInOwYNhfnTOTT53McpfFa6+VfPWwmPi0zW0aJ0C97K+6MhNHYe6A==",
+        "sha512-sQyOGJabAUTEWCKe1O6GNsE7NKnHCHSjzLrazfYUgw8OFsFDeAQGVEwzvpXTK1yW1hJiLLAMRzC/W2Vu7m9DwQ==",
       layout: "npm",
       executable: "vendor/aarch64-apple-darwin/bin/codex",
     },
     "darwin-x64": {
-      version: "0.159.0",
-      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.159.0-darwin-x64.tgz",
+      version: "0.170.0",
+      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-darwin-x64.tgz",
       integrity:
-        "sha512-uNsvmDAYH2H7/uJi3NYtn0d+bpMHgovZyZwm62Q8q/cdd1rp5oEbk2Axe5pbyiWFwSpjdT6fbuY8gTdX2i7zjg==",
+        "sha512-lniwntVB9YaCQNNaTgpLxVvABkrnZDCO/UZf3z7POwH71ikkVNi7NxBrfl6aSIS9b3UBJKxjPlAm3qeIxINJVg==",
       layout: "npm",
       executable: "vendor/x86_64-apple-darwin/bin/codex",
     },
     "linux-arm64": {
-      version: "0.159.0",
-      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.159.0-linux-arm64.tgz",
+      version: "0.170.0",
+      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-linux-arm64.tgz",
       integrity:
-        "sha512-cm7ihiXIZILGQPWgak3ApOcRZ6beupDNPHVAJ9CyHxZSQPsTy6CSYg1GYLVe2DlRUQYprnXHZceOgheXo0PvHA==",
+        "sha512-mJLm5eia/GcukCrRfVEnYVD5dOXGE7cmpd9dJ/ixkSiKifzDAPaGq83ZEmwVhk3PxbdTPUSLRpnXZQKbNS5HoA==",
       layout: "npm",
       executable: "vendor/aarch64-unknown-linux-musl/bin/codex",
     },
     "linux-x64": {
-      version: "0.159.0",
-      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.159.0-linux-x64.tgz",
+      version: "0.170.0",
+      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-linux-x64.tgz",
       integrity:
-        "sha512-7ks+EeQjX33wfJXbggseyF0CJRFVgzDHA6BzC7mJjFsJKmdAuOFWMFeMeZe8vL/G6xEpL29wOdwR85sK49F0iA==",
+        "sha512-6cCZJaZL17tiTAvhd1Pirt8vsV1dP8CfG94+IHygUO4m24oYLQrIInJJLyKzcMv/uUonbu1dF2JmcXhA/s5bsg==",
       layout: "npm",
       executable: "vendor/x86_64-unknown-linux-musl/bin/codex",
     },
     "win32-arm64": {
-      version: "0.159.0",
-      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.159.0-win32-arm64.tgz",
+      version: "0.170.0",
+      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-win32-arm64.tgz",
       integrity:
-        "sha512-o4oHXi4IONlLyMRHOIxXTPG1OdbD7Pxmqd2AcYRWHXP1YjrdqdEQozqQLU05rdYGcfrwBwcBqPpGO9LLVHd0fg==",
+        "sha512-VSfDt/Y/RYqeT+9gCwmIO1kEj7bF7RYQdhanhMWQqWpZBdPLrF19z2z8JbL+Gt/amE7A1d/Rt2g/p44DLrDhFg==",
       layout: "npm",
       executable: "vendor/aarch64-pc-windows-msvc/bin/codex.exe",
     },
     "win32-x64": {
-      version: "0.159.0",
-      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.159.0-win32-x64.tgz",
+      version: "0.170.0",
+      url: "https://registry.npmjs.org/@openai/codex/-/codex-0.170.0-win32-x64.tgz",
       integrity:
-        "sha512-Fp+TghoUzxOguHj/WAxOIZCIJpTOb4pB9p90tf6+g2PSTWSCvqpawwxPmDuCMxKs8Sn1gO5zP621PoCkBt5cuQ==",
+        "sha512-eNlCGvSTKMegqo1R0PPfAf0jOQp8OGfWH8WX2UyTtRN6E/YOecJnz4n1X9lIb02O8Zda/Lv6/WST7+8mufTVSw==",
       layout: "npm",
       executable: "vendor/x86_64-pc-windows-msvc/bin/codex.exe",
     },
@@ -133,35 +134,44 @@ export const PROVIDER_MANIFEST: RuntimeManifest<NativeProviderID> = {
     },
   },
   antigravity: {
-    "darwin-arm64": {
-      version: "1.2.16",
-      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.2.16/agy_cli_mac_arm64.tar.gz",
+    "win32-x64": {
+      version: "1.5.12",
+      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.12/agy_cli_windows_x64.zip",
       integrity:
-        "sha512-g0pi3Jcs/fCc2wAce6ebtbya5azbqL2cTSk5BFt24Zyb227qxY7Yih3qoWcPyTNe7hhIL+LzJgPngiTelXOw/g==",
+        "sha512-sBLSIiGyfRn0E4jLfXsWyAuaXUr+q6FYqkv125kTjR5O8iptSLVc7PXAw8shmxpfLw9dGiJd3KXV1Kq1YWqAFw==",
+      layout: "flat",
+      archive: "zip",
+      executable: "antigravity.exe",
+    },
+    "darwin-arm64": {
+      version: "1.5.12",
+      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.12/agy_cli_mac_arm64.tar.gz",
+      integrity:
+        "sha512-8NlRtBvdtiy+4BmaYMyamroWzsuVxc99XHE0nHRcV48tK7zhGUsFjoZ+hUVgMKwbHscncu4Xsx3h1gbzTM4xVA==",
       layout: "flat",
       executable: "antigravity",
     },
     "darwin-x64": {
-      version: "1.2.16",
-      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.2.16/agy_cli_mac_x64.tar.gz",
+      version: "1.5.12",
+      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.12/agy_cli_mac_x64.tar.gz",
       integrity:
-        "sha512-C9EfuvRIr8Z13eNhODsAsDQSpxzroD9sooq+o8jRlGJMFKtnyTkOJnG1BV7FgY7EPLVas9jSnFd8u6kXyoRrNw==",
+        "sha512-s5LpTlk6PJPpCxTid8gOlxLBRC26D2intIkYu+uZAlClRO7feRQm06/ZUWISi03jIPVJ8mOWQNIOHSW1Z3hMfw==",
       layout: "flat",
       executable: "antigravity",
     },
     "linux-arm64": {
-      version: "1.2.16",
-      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.2.16/agy_cli_linux_arm64_musl.tar.gz",
+      version: "1.5.12",
+      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.12/agy_cli_linux_arm64_musl.tar.gz",
       integrity:
-        "sha512-P175UjZbWMNY7Xngu2F2ixev39j9AMz9ObBvUHicjABpiQz4hYPg7foZTB3dlkAhHwKo2qxYpB+b1zuseG5BTA==",
+        "sha512-U3nioGELQA4vcVLRuj8FAMd1lZrBxSszjGvPFefmwDJL8ne79ORjPLE3fv1C+qdokpT/CDd7thZE07qezEn5pg==",
       layout: "flat",
       executable: "antigravity",
     },
     "linux-x64": {
-      version: "1.2.16",
-      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.2.16/agy_cli_linux_x64_musl.tar.gz",
+      version: "1.5.12",
+      url: "https://github.com/google-antigravity/antigravity-cli/releases/download/1.5.12/agy_cli_linux_x64_musl.tar.gz",
       integrity:
-        "sha512-R6EmFhOT0fqXjqOl3g5zcJpJ07dRopnFZvyYVV/Zh3ZNmFJjHpLMnQrDE+n/C4aHiOhZb9JG/kFFg/eKpYJ+HA==",
+        "sha512-RJmyohJ98biWAc6Byaqhqqeq1tKCusjH7YorIOH1wr7EO9X/zTvn6iWNcgXPSRHNmVEUwxHfe/LQf799NRjk+g==",
       layout: "flat",
       executable: "antigravity",
     },

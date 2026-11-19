@@ -8,7 +8,7 @@ import { z } from "zod";
 import { ModelsDev } from "@openchart/models/catalog";
 import {
   ANTIGRAVITY,
-  TIER4,
+  TIER6,
   resolveModelTier,
 } from "@openchart/models/model-tiers";
 import {
@@ -71,8 +71,11 @@ const ROWS = [
   ["gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"],
   ["gemini-3.8-flash-medium", "Gemini 3.8 Flash (Medium)"],
   ["gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"],
-  ["gemini-3.1-pro-high", "Gemini 3.1 Pro (High)"],
-  ["gemini-3.1-pro-low", "Gemini 3.1 Pro (Low)"],
+  ["gemini-4-hydrogen-high", "Gemini 4 Hydrogen (High)"],
+  ["gemini-4-hydrogen-low", "Gemini 4 Hydrogen (Low)"],
+  ["gemini-4-argon-medium", "Gemini 4 Argon (Medium)"],
+  ["gemini-4-neon-high", "Gemini 4 Neon (High)"],
+  ["gemini-4-neon-xhigh", "Gemini 4 Neon (XHigh)"],
   ["claude-opus-5-5-low", "Claude Opus 5.5 (Low)"],
   ["claude-opus-5-5-medium", "Claude Opus 5.5 (Medium)"],
   ["claude-opus-5-5-high", "Claude Opus 5.5 (High)"],
@@ -93,7 +96,7 @@ describe("antigravity.createModelProvider", () => {
     });
   });
 
-  it("checks installation first and signs in through bash", async () => {
+  it("checks installation first and signs in with the platform login command", async () => {
     native.installed.mockReturnValue(false);
     const binding = await createBinding();
     expect(await binding.discover()).toEqual({ status: "not_installed" });
@@ -104,15 +107,21 @@ describe("antigravity.createModelProvider", () => {
     const result = await binding.discover();
     expect(result).toMatchObject({
       status: "authentication_required",
-      login: {
-        executable: "/bin/bash",
-        args: [
-          "-c",
-          expect.any(String),
-          "antigravity-sign-in",
-          "/test/antigravity",
-        ],
-      },
+      login:
+        process.platform === "win32"
+          ? {
+              executable: "/test/antigravity",
+              args: ["-p", "/usage"],
+            }
+          : {
+              executable: "/bin/bash",
+              args: [
+                "-c",
+                expect.any(String),
+                "antigravity-sign-in",
+                "/test/antigravity",
+              ],
+            },
     });
   });
 
@@ -194,9 +203,11 @@ describe("antigravity.createModelProvider", () => {
         model.availableVariants,
       ]),
     ).toEqual([
-      ["claude-opus-5-5", 4, ["low", "medium", "high"]],
-      ["claude-sonnet-5-5", 3, ["low"]],
-      ["gemini-3.1-pro", 2, ["low", "high"]],
+      ["claude-opus-5-5", 6, ["low", "medium", "high"]],
+      ["claude-sonnet-5-5", 5, ["low"]],
+      ["gemini-4-neon", 4, ["high", "xhigh"]],
+      ["gemini-4-argon", 3, ["medium"]],
+      ["gemini-4-hydrogen", 2, ["low", "high"]],
       ["gemini-3.8-flash", 1, ["low", "medium", "high"]],
       ["gpt-oss-120b", undefined, ["medium"]],
       ["gemini-experimental", undefined, []],
@@ -224,20 +235,20 @@ describe("antigravity.createModelProvider", () => {
     });
     // No exact catalog match: prices and limits stay unknown.
     expect(
-      provider.models.find((model) => model.id === "gemini-3.1-pro")?.cost,
+      provider.models.find((model) => model.id === "gemini-4-neon")?.cost,
     ).toBeUndefined();
-    expect(resolveModelTier(ANTIGRAVITY, TIER4, provider.models)?.id).toBe(
+    expect(resolveModelTier(ANTIGRAVITY, TIER6, provider.models)?.id).toBe(
       "claude-opus-5-5",
     );
   });
 
   it("falls back to Gemini when the plan offers no Claude models", async () => {
     discoverModels.mockResolvedValue(
-      ROWS.filter((row) => row.id.startsWith("gemini-3.")),
+      ROWS.filter((row) => row.id.startsWith("gemini-")),
     );
     const provider = ready(await (await createBinding()).discover());
-    expect(resolveModelTier(ANTIGRAVITY, TIER4, provider.models)?.id).toBe(
-      "gemini-3.1-pro",
+    expect(resolveModelTier(ANTIGRAVITY, TIER6, provider.models)?.id).toBe(
+      "gemini-4-neon",
     );
   });
 

@@ -92,6 +92,7 @@ test("lists tier choices under models without the old Agent route", async () => 
         id: CODEX,
         name: "Codex",
         models: [
+          { ...model, id: "tier6" },
           { ...model, id: "tier5" },
           { ...model, id: "tier4" },
           { ...model, id: "tier3" },

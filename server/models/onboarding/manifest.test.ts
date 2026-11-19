@@ -53,15 +53,20 @@ test("Claude SDK, Desktop staging and every native artifact use one paired relea
 });
 
 test("every Antigravity pin is one flat GitHub release", () => {
-  const pins = Object.values(PROVIDER_MANIFEST[ANTIGRAVITY]);
-  const versions = new Set(pins.map((pin) => pin.version));
+  const pins = Object.entries(PROVIDER_MANIFEST[ANTIGRAVITY]);
+  const versions = new Set(pins.map(([, pin]) => pin.version));
   expect(versions.size).toBe(1);
   const [version] = versions;
-  for (const pin of pins) {
-    expect(pin).toMatchObject({ layout: "flat", executable: "antigravity" });
+  for (const [platform, pin] of pins) {
+    const windows = platform.startsWith("win32-");
+    expect(pin).toMatchObject({
+      layout: "flat",
+      executable: windows ? "antigravity.exe" : "antigravity",
+      ...(windows && { archive: "zip" }),
+    });
     expect(pin.url).toMatch(
       new RegExp(
-        `^https://github\\.com/google-antigravity/antigravity-cli/releases/download/${version!.replaceAll(".", "\\.")}/agy_cli_[a-z0-9_]+\\.tar\\.gz$`,
+        `^https://github\\.com/google-antigravity/antigravity-cli/releases/download/${version!.replaceAll(".", "\\.")}/agy_cli_[a-z0-9_]+\\.${windows ? "zip" : "tar\\.gz"}$`,
       ),
     );
   }

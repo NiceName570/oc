@@ -58,7 +58,7 @@ describe("AgentPromptInput", () => {
     { providerID: "codxe", modelID: "tier1" },
     { providerID: "openai-compatible", modelID: "tier1" },
     { providerID: CODEX, modelID: "tier0" },
-    { providerID: CODEX, modelID: "tier6" },
+    { providerID: CODEX, modelID: "tier7" },
     { providerID: CODEX, modelID: "gpt-6-astra" },
     { providerID: CODEX, modelID: "" },
   ])("rejects invalid model selection $providerID/$modelID", (model) => {
@@ -76,7 +76,7 @@ describe("AgentPromptInput", () => {
       "codex" | "claude-code" | "antigravity" | "grok"
     >();
     expectTypeOf<AgentPromptModel["modelID"]>().toEqualTypeOf<
-      "tier1" | "tier2" | "tier3" | "tier4" | "tier5"
+      "tier1" | "tier2" | "tier3" | "tier4" | "tier5" | "tier6"
     >();
   });
 

@@ -1,10 +1,12 @@
 // Purpose: Proves alias preference and provider-local downward fallback without guessing availability.
 
 import { describe, expect, it } from "vitest";
+import { antigravityTiers } from "@openchart/models/providers/antigravity/tiers";
 import { claudeCodeTiers } from "@openchart/models/providers/claude-code/tiers";
 import { codexTiers } from "@openchart/models/providers/codex/tiers";
 import type { AvailableModel } from "./model-provider";
 import {
+  ANTIGRAVITY,
   CLAUDE_CODE,
   CODEX,
   TIER1,
@@ -12,6 +14,7 @@ import {
   TIER3,
   TIER4,
   TIER5,
+  TIER6,
   ModelTier,
   classifyModels,
   resolveModelTier,
@@ -34,10 +37,10 @@ function model(
 }
 
 describe("logical model tiers", () => {
-  it("accepts only the five logical IDs", () => {
-    for (const id of [TIER1, TIER2, TIER3, TIER4, TIER5])
+  it("accepts only the six logical IDs", () => {
+    for (const id of [TIER1, TIER2, TIER3, TIER4, TIER5, TIER6])
       expect(ModelTier.parse(id)).toBe(id);
-    for (const id of ["tier0", "tier6", "fable", "gpt-6-astra"])
+    for (const id of ["tier0", "tier7", "fable", "gpt-6-astra"])
       expect(ModelTier.safeParse(id).success).toBe(false);
   });
 
@@ -150,6 +153,7 @@ describe("logical model tiers", () => {
   });
 
   it.each([
+    [["gpt-6-sol", "gpt-6.1-sol", "gpt-6.2-sol"], "gpt-6.2-sol"],
     [["gpt-6-sol", "gpt-6.1-sol"], "gpt-6.1-sol"],
     [["gpt-6-sol"], "gpt-6-sol"],
   ])("resolves discovered Sol candidates %j to %s", (discovered, expected) => {
@@ -161,6 +165,50 @@ describe("logical model tiers", () => {
     expect(resolveModelTier(CODEX, TIER4, models)?.id).toBe(expected);
   });
 
+  it("prefers Codex 6.2 Astra and 6.1 Terra when discovered", () => {
+    const models = classifyModels(codexTiers, [
+      model("gpt-5.6-luna", CODEX),
+      model("gpt-5.6-terra", CODEX),
+      model("gpt-6.1-terra", CODEX),
+      model("gpt-6.2-sol", CODEX),
+      model("gpt-6-astra", CODEX),
+      model("gpt-6.2-astra", CODEX),
+    ]);
+    expect(
+      [TIER1, TIER2, TIER3, TIER4].map(
+        (tier) => resolveModelTier(CODEX, tier, models)?.id,
+      ),
+    ).toEqual([
+      "gpt-5.6-luna",
+      "gpt-6.1-terra",
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
+    ]);
+  });
+
+  it("resolves Antigravity tiers to Gemini 4 and Claude models with downward fallback", () => {
+    const models = classifyModels(antigravityTiers, [
+      model("gemini-3.8-flash", ANTIGRAVITY),
+      model("gemini-4-hydrogen", ANTIGRAVITY),
+      model("gemini-4-argon", ANTIGRAVITY),
+      model("gemini-4-neon", ANTIGRAVITY),
+      model("claude-sonnet-5-5", ANTIGRAVITY),
+      model("claude-opus-5-5", ANTIGRAVITY),
+    ]);
+    expect(
+      [TIER1, TIER2, TIER3, TIER4, TIER5, TIER6].map(
+        (tier) => resolveModelTier(ANTIGRAVITY, tier, models)?.id,
+      ),
+    ).toEqual([
+      "gemini-3.8-flash",
+      "gemini-4-hydrogen",
+      "gemini-4-argon",
+      "gemini-4-neon",
+      "claude-sonnet-5-5",
+      "claude-opus-5-5",
+    ]);
+  });
+
   it("publishes logical choices with the metadata of the model each choice actually resolves to", () => {
     const models = classifyModels(codexTiers, [
       model("gpt-5.6-luna", CODEX),
@@ -169,6 +217,7 @@ describe("logical model tiers", () => {
     const choices = modelChoices({ id: CODEX, name: "Codex", models })[0]!
       .models;
     expect(choices.map(({ id }) => id)).toEqual([
+      TIER6,
       TIER5,
       TIER4,
       TIER3,
@@ -177,7 +226,8 @@ describe("logical model tiers", () => {
     ]);
     expect(choices[0]?.name).toBe("gpt-6-astra");
     expect(choices[1]?.name).toBe("gpt-6-astra");
-    expect(choices[3]?.name).toBe("gpt-5.6-luna");
+    expect(choices[2]?.name).toBe("gpt-6-astra");
+    expect(choices[4]?.name).toBe("gpt-5.6-luna");
     expect(choices[0]?.providerID).toBe(CODEX);
   });
 

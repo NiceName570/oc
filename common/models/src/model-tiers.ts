@@ -33,9 +33,18 @@ export const TIER3 = "tier3" as const;
 export const TIER4 = "tier4" as const;
 /** Tier 5, falling back through tier 1. */
 export const TIER5 = "tier5" as const;
+/** Tier 6, falling back through tier 1. */
+export const TIER6 = "tier6" as const;
 
 /** Logical model IDs in ascending fallback order. */
-export const MODEL_TIER_IDS = [TIER1, TIER2, TIER3, TIER4, TIER5] as const;
+export const MODEL_TIER_IDS = [
+  TIER1,
+  TIER2,
+  TIER3,
+  TIER4,
+  TIER5,
+  TIER6,
+] as const;
 /** Recognizes logical tier IDs; other model references remain explicit SDK IDs. */
 export const ModelTier = z.enum(MODEL_TIER_IDS);
 /** Logical model identity derived from its boundary schema. */

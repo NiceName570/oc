@@ -21,6 +21,7 @@ export {
   TIER3,
   TIER4,
   TIER5,
+  TIER6,
 } from "@openchart/models/model-tiers";
 
 export * as resource from "./resource";
