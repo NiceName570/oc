@@ -489,6 +489,12 @@ function SeriesColorSetting({
       "#000000",
   );
   const { r, g, b } = Color.toRGB(color);
+  const hex = Color.toHex(r, g, b);
+  const alpha = alphaOf(color);
+  const choose = (nextHex: string, opacity: number) =>
+    updateSeriesStyles(localStore, [seriesId], {
+      [field]: opacity >= 1 ? nextHex : Color.withAlpha(nextHex, opacity),
+    });
   return (
     <CardItem
       title={label}
@@ -515,23 +521,37 @@ function SeriesColorSetting({
             type="color"
             className="size-8 cursor-pointer p-0.5"
             id={`series-${field}-${seriesId}`}
-            value={Color.toHex(r, g, b)}
-            onChange={(event) =>
-              updateSeriesStyles(localStore, [seriesId], {
-                [field]: event.target.value,
-              })
-            }
+            value={hex}
+            onChange={(event) => choose(event.target.value, alpha)}
           />
+          <input
+            type="range"
+            aria-label={`${label} opacity`}
+            className="w-24 accent-primary"
+            min={0}
+            max={1}
+            step={0.05}
+            value={alpha}
+            onChange={(event) => choose(hex, Number(event.target.value))}
+          />
+          <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
+            {Math.round(alpha * 100)}%
+          </span>
         </div>
       }
     />
   );
 }
 
-// A part's opacity: the alpha of an `rgba(...)` color, else opaque.
+// A color's opacity: the alpha of `rgba(...)` or `#RRGGBBAA`, else opaque.
 function alphaOf(color: string): number {
-  const match = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)$/.exec(color);
-  return match ? Number(match[1]) : 1;
+  const trimmed = color.trim();
+  const rgba = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)$/.exec(trimmed);
+  if (rgba) return Math.max(0, Math.min(1, Number(rgba[1])));
+  const hex8 = /^#[\da-f]{6}([\da-f]{2})$/i.exec(trimmed);
+  if (hex8)
+    return Math.round((parseInt(hex8[1] ?? "ff", 16) / 255) * 100) / 100;
+  return 1;
 }
 
 /**
@@ -628,6 +648,9 @@ function ProfilePartColors({
                         choose(Color.toHex(r, g, b), Number(event.target.value))
                       }
                     />
+                    <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
+                      {Math.round(alpha * 100)}%
+                    </span>
                   </div>
                 }
               />

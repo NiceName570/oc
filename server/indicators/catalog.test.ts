@@ -171,33 +171,6 @@ describe("indicator templates", () => {
               ),
               `${entry.id}/${field.name}`,
             ).toBe(true);
-            if (field.name === "candles") {
-              const values = outputNumbers(output.at(-1)![field.name]);
-              expect(
-                values.length,
-                `${entry.id}/${field.name}`,
-              ).toBeGreaterThan(0);
-              expect(
-                values.every((value) => Number.isFinite(value)),
-                `${entry.id}/${field.name}`,
-              ).toBe(true);
-            }
-            if (field.name === "profile") {
-              const profileRows = output.filter(
-                (row) => row[field.name] !== null,
-              );
-              expect(
-                profileRows.length,
-                `${entry.id}/${field.name}`,
-              ).toBeGreaterThan(0);
-              for (const row of profileRows) {
-                const values = outputNumbers(row[field.name]);
-                expect(values.length).toBeGreaterThan(0);
-                expect(values.every((value) => Number.isFinite(value))).toBe(
-                  true,
-                );
-              }
-            }
             continue;
           }
           const values = outputNumbers(output.at(-1)![field.name]);
@@ -319,7 +292,7 @@ it.each([
   },
 );
 
-it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones and session profile without lookahead", async () => {
+it("order-flow-bubbles emits editable-color volume orbs, absorption orbs and optional candles without lookahead", async () => {
   const source = await readFile(
     new URL("./builtins/order-flow-bubbles.tea", import.meta.url),
     "utf8",
@@ -334,10 +307,11 @@ it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones 
       close: number;
       volume: number;
     }[],
+    parameters: Record<string, string | number | boolean> = {},
   ) => {
     const node = createNode(
       compiled.module.bind(
-        {},
+        parameters,
         marketContext(compiled.module.inputs, [market], market.resolution),
       ),
       pineBuiltinSupplier(),
@@ -380,7 +354,7 @@ it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones 
     }
   };
 
-  const bars = Array.from({ length: 80 }, (_, i) => {
+  const bars = Array.from({ length: 65 }, (_, i) => {
     const time = Date.UTC(2026, 0, 5) + i * 3_600_000;
     if (i === 28) {
       return {
@@ -390,56 +364,6 @@ it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones 
         low: 100.8,
         close: 103.5,
         volume: 4000,
-      };
-    }
-    if (i === 32) {
-      return {
-        time,
-        open: 103,
-        high: 104.2,
-        low: 102.8,
-        close: 104,
-        volume: 1000,
-      };
-    }
-    if (i === 33) {
-      return {
-        time,
-        open: 104.2,
-        high: 109.2,
-        low: 104,
-        close: 109,
-        volume: 2200,
-      };
-    }
-    if (i === 34) {
-      return {
-        time,
-        open: 109,
-        high: 110.5,
-        low: 108.5,
-        close: 110,
-        volume: 1000,
-      };
-    }
-    if (i === 35 || i === 36) {
-      return {
-        time,
-        open: 108.5,
-        high: 109.5,
-        low: 108,
-        close: 108.5,
-        volume: 1000,
-      };
-    }
-    if (i === 37) {
-      return {
-        time,
-        open: 107,
-        high: 107.5,
-        low: 103,
-        close: 104,
-        volume: 1100,
       };
     }
     if (i === 55) {
@@ -465,7 +389,13 @@ it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones 
   const output = await runScenario(bars);
   expect(output).toHaveLength(bars.length);
 
-  // Baseline low-volume bar emits no volume bubbles.
+  // Focus strictly on orbs and optional candles; no tan imbalance boxes or duplicate session profile.
+  const firstRow = output[0]!;
+  expect(firstRow).not.toHaveProperty("bull_imbalance");
+  expect(firstRow).not.toHaveProperty("bear_imbalance");
+  expect(firstRow).not.toHaveProperty("profile");
+
+  // Baseline low-volume bar emits no volume orbs and leaves candle color unset by default.
   for (const key of [
     "bubble_xs",
     "bubble_s",
@@ -477,66 +407,68 @@ it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones 
       Number.isFinite((output[10]![key] as { series: number }).series),
     ).toBe(false);
   }
+  expect((output[10]!.candles as { color: unknown }).color).toBeNull();
 
-  // Bullish burst fires green bubble_l.
+  // Bullish burst fires translucent lime green bubble_l (75% opacity => alpha 191).
   const bullBurst = output[28]!.bubble_l as {
     series: number;
-    color: { r: number; g: number; b: number };
+    color: { r: number; g: number; b: number; a: number };
   };
   expect(Number.isFinite(bullBurst.series)).toBe(true);
-  expect(bullBurst.color).toMatchObject({ r: 124, g: 255, b: 46 });
+  expect(bullBurst.color).toMatchObject({ r: 124, g: 255, b: 46, a: 191 });
 
-  // Climax bearish rejection fires red bubble_xl AND nested green absorb_l.
+  // Climax bearish rejection fires red bubble_xl (a=191) AND nested green absorb_l (a=217).
   const climaxOuter = output[55]!.bubble_xl as {
     series: number;
-    color: { r: number; g: number; b: number };
+    color: { r: number; g: number; b: number; a: number };
   };
   const climaxNested = output[55]!.absorb_l as {
     series: number;
-    color: { r: number; g: number; b: number };
+    color: { r: number; g: number; b: number; a: number };
   };
   expect(Number.isFinite(climaxOuter.series)).toBe(true);
-  expect(climaxOuter.color).toMatchObject({ r: 255, g: 32, b: 32 });
+  expect(climaxOuter.color).toMatchObject({ r: 255, g: 32, b: 32, a: 191 });
   expect(Number.isFinite(climaxNested.series)).toBe(true);
-  expect(climaxNested.color).toMatchObject({ r: 124, g: 255, b: 46 });
+  expect(climaxNested.color).toMatchObject({ r: 124, g: 255, b: 46, a: 217 });
 
-  // Confirmed 3-bar upward imbalance extends until price drops to its bottom edge.
-  const fvgFormed = output[34]!.bull_imbalance as {
-    start_time: number;
-    end_time: number;
-    top: number;
-    bottom: number;
-  };
-  expect(fvgFormed).toMatchObject({
-    start_time: bars[32]!.time,
-    end_time: bars[34]!.time,
-    top: bars[34]!.low,
-    bottom: bars[32]!.high,
+  // Custom #RRGGBBAA and #RRGGBB color overrides propagate to orbs, absorption orbs, and candles.
+  const custom = await runScenario(bars, {
+    buyOrbColor: "#00AAFF80",
+    sellOrbColor: "#FF880066",
+    buyAbsorbColor: "#FFEE00CC",
+    colorCandles: true,
+    bullCandleColor: "#11EE99",
+    bearCandleColor: "#AA22CC",
   });
-  expect((output[37]!.bull_imbalance as { end_time: number }).end_time).toBe(
-    bars[37]!.time,
-  );
-  expect((output[38]!.bull_imbalance as { end_time: number }).end_time).toBe(
-    bars[37]!.time,
-  );
-
-  // Multi-day bars emit session volume profiles with magenta POC levels.
-  const profiles = output
-    .map((row) => row.profile)
-    .filter(
-      (
-        value,
-      ): value is {
-        rows: unknown[];
-        levels: { color: { r: number; g: number; b: number } }[];
-      } => value !== null && value !== undefined,
-    );
-  expect(profiles.length).toBeGreaterThanOrEqual(2);
-  expect(profiles[0]!.rows.length).toBeGreaterThan(0);
-  expect(profiles[0]!.levels[0]!.color).toMatchObject({
-    r: 217,
-    g: 70,
-    b: 239,
+  expect((custom[28]!.bubble_l as { color: unknown }).color).toMatchObject({
+    r: 0,
+    g: 170,
+    b: 255,
+    a: 128,
+  });
+  expect((custom[55]!.bubble_xl as { color: unknown }).color).toMatchObject({
+    r: 255,
+    g: 136,
+    b: 0,
+    a: 102,
+  });
+  expect((custom[55]!.absorb_l as { color: unknown }).color).toMatchObject({
+    r: 255,
+    g: 238,
+    b: 0,
+    a: 204,
+  });
+  expect((custom[28]!.candles as { color: unknown }).color).toMatchObject({
+    r: 17,
+    g: 238,
+    b: 153,
+    a: 255,
+  });
+  expect((custom[55]!.candles as { color: unknown }).color).toMatchObject({
+    r: 170,
+    g: 34,
+    b: 204,
+    a: 255,
   });
 
   // Confirmed historical bar-level visuals never change when later bars arrive.
@@ -549,8 +481,6 @@ it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones 
     "bubble_xl",
     "absorb_s",
     "absorb_l",
-    "bull_imbalance",
-    "bear_imbalance",
     "candles",
   ];
   for (let i = 0; i < 59; i++) {

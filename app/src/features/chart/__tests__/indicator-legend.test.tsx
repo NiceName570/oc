@@ -397,8 +397,16 @@ it("shows colored crosshair values in one row, toggles all outputs, edits each o
       visible: false,
       color: "#123456",
     });
+    fireEvent.change(screen.getByLabelText("Color opacity"), {
+      target: { value: "0.4" },
+    });
+    expect(preferences.getState().series[upper!.id]).toEqual({
+      visible: false,
+      color: "rgba(18, 52, 86, 0.4)",
+    });
     await user.click(screen.getByRole("button", { name: "Reset color" }));
     expect(screen.getByLabelText("Color")).toHaveValue("#00ff00");
+    expect(screen.getByLabelText("Color opacity")).toHaveValue("1");
     expect(preferences.getState().series[upper!.id]).toEqual({
       visible: false,
     });

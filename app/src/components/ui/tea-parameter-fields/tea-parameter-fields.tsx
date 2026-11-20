@@ -13,6 +13,27 @@ import { DropdownControl } from "@openchart/app/components/ui/settings/dropdown-
 // An `input.source` picks one of the Bars columns.
 const sourceOptions = Tea.barsSchema.fields.map((field) => field.name);
 
+function parseHexColor(raw: unknown): { hex: string; opacity: number } {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  const match = /^#([\da-f]{6})([\da-f]{2})?$/i.exec(value);
+  if (!match) return { hex: "#000000", opacity: 1 };
+  const hex = `#${(match[1] ?? "000000").toLowerCase()}`;
+  const alphaHex = match[2];
+  const opacity = alphaHex
+    ? Math.round((parseInt(alphaHex, 16) / 255) * 100) / 100
+    : 1;
+  return { hex, opacity };
+}
+
+function formatHexColor(hex: string, opacity: number): string {
+  const clamped = Math.max(0, Math.min(1, opacity));
+  if (clamped >= 1) return hex;
+  const alpha = Math.round(clamped * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `${hex}${alpha}`;
+}
+
 type SymbolPicker = ComponentType<{
   initialQuery?: string;
   onSelect: (listing: ProviderListing) => void | Promise<void>;
@@ -72,12 +93,13 @@ export function TeaParameterFields({
               name: String(option),
             }));
           const fieldId = `${id}-${parameter.name}`;
+          const label = parameter.title || parameter.name;
           return (
             <CardItem
               key={parameter.name}
               className="flex-wrap gap-3"
               classNameWrapperAction="ml-auto max-w-full"
-              title={parameter.title || parameter.name}
+              title={label}
               htmlFor={fieldId}
               actions={
                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -86,7 +108,7 @@ export function TeaParameterFields({
                       type="button"
                       variant="ghost"
                       size="xs"
-                      aria-label={`Reset ${parameter.title || parameter.name}`}
+                      aria-label={`Reset ${label}`}
                       disabled={disabled}
                       onClick={() => reset(parameter.name)}
                     >
@@ -102,6 +124,46 @@ export function TeaParameterFields({
                       }
                       disabled={disabled}
                     />
+                  ) : parameter.type === "color" ? (
+                    (() => {
+                      const { hex, opacity } = parseHexColor(value);
+                      return (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id={fieldId}
+                            type="color"
+                            className="size-8 cursor-pointer p-0.5"
+                            value={hex}
+                            onChange={(event) =>
+                              set(
+                                parameter.name,
+                                formatHexColor(event.target.value, opacity),
+                              )
+                            }
+                            disabled={disabled}
+                          />
+                          <input
+                            type="range"
+                            aria-label={`${label} opacity`}
+                            className="w-24 accent-primary"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={opacity}
+                            onChange={(event) =>
+                              set(
+                                parameter.name,
+                                formatHexColor(hex, Number(event.target.value)),
+                              )
+                            }
+                            disabled={disabled}
+                          />
+                          <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
+                            {Math.round(opacity * 100)}%
+                          </span>
+                        </div>
+                      );
+                    })()
                   ) : options ? (
                     <div className="w-40">
                       <DropdownControl

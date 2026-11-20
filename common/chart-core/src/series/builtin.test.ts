@@ -245,4 +245,45 @@ describe("LineSeries circles outline ring", () => {
     expect(ctx.lineWidth).toBe(1.5);
     expect(ctx.strokeStyle).toBe("rgba(124, 255, 46, 0.95)");
   });
+
+  it("scales large bubble outline opacity with translucent colors and skips stroke at zero opacity", () => {
+    const options = {
+      ...LineSeries.defaultOptions,
+      lineType: "circles" as const,
+      lineWidth: 10,
+    };
+    const makeCtx = () =>
+      ({
+        save: vi.fn(),
+        restore: vi.fn(),
+        beginPath: vi.fn(),
+        arc: vi.fn(),
+        fill: vi.fn(),
+        stroke: vi.fn(),
+        fillStyle: "",
+        strokeStyle: "",
+        lineWidth: 0,
+      }) as unknown as CanvasRenderingContext2D;
+
+    const translucentCtx = makeCtx();
+    LineSeries.render(
+      translucentCtx,
+      [{ x: 20, y: 40, index: 0, color: "rgba(124, 255, 46, 0.4)" }],
+      { from: 0, to: 1 },
+      options,
+    );
+    expect(translucentCtx.fill).toHaveBeenCalledTimes(1);
+    expect(translucentCtx.stroke).toHaveBeenCalledTimes(1);
+    expect(translucentCtx.strokeStyle).toBe("rgba(124, 255, 46, 0.52)");
+
+    const transparentCtx = makeCtx();
+    LineSeries.render(
+      transparentCtx,
+      [{ x: 20, y: 40, index: 0, color: "rgba(124, 255, 46, 0)" }],
+      { from: 0, to: 1 },
+      options,
+    );
+    expect(transparentCtx.fill).toHaveBeenCalledTimes(1);
+    expect(transparentCtx.stroke).not.toHaveBeenCalled();
+  });
 });

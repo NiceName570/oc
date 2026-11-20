@@ -870,11 +870,11 @@ const indicatorDiscovery: Record<BuiltinIndicatorId, IndicatorDiscovery> = {
       "Accumulates volume according to close-to-close price direction. A rising line means more accumulated volume has accompanied rising closes; a falling line means the opposite. Compare its direction with price rather than its absolute level, which depends on the available history.",
   },
   "order-flow-bubbles": {
-    goals: ["read-volume", "read-structure"],
+    goals: ["read-volume"],
     prompt:
-      "Overlay DeepCharts-style proportional green and red volume bubbles scaled by relative bar volume, nested opposite-color wick-absorption bubbles, untested olive-gold 3-bar imbalance (FVG) zones, a session volume profile with a magenta point of control, and optional green/purple candle colors.",
+      "Overlay DeepCharts-style proportional buy and sell volume orbs scaled by relative bar volume, optional nested opposite-color wick-absorption orbs, and optional custom candle colors, with editable color and transparency inputs for every visual element.",
     description:
-      "Highlights high-volume buying and selling bursts directly on price as proportionally sized lime-green and red circles, with nested opposite-color absorption circles on heavy opposing wicks, olive-gold untested imbalance zones, and a session volume profile with magenta POC. Computed from OHLCV candles so it works on any feed or timeframe rather than requiring CME Level 2 tick data.",
+      "Highlights high-volume buying and selling bursts directly on price as proportionally sized translucent orbs, with optional nested opposite-color absorption orbs on heavy opposing wicks and optional custom candle colors. Every color and transparency level is editable in Inputs, and it runs on standard OHLCV candles for any symbol or timeframe.",
   },
   "price-volume-trend": {
     goals: ["read-volume", "follow-trends", "find-reversals"],

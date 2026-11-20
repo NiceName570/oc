@@ -21,6 +21,15 @@ function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : NaN;
 }
 
+function colorAlpha(color: string): number {
+  const trimmed = color.trim();
+  const rgba = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)$/i.exec(trimmed);
+  if (rgba) return Math.max(0, Math.min(1, Number(rgba[1])));
+  const hex8 = /^#[\da-f]{6}([\da-f]{2})$/i.exec(trimmed);
+  if (hex8) return parseInt(hex8[1] ?? "ff", 16) / 255;
+  return 1;
+}
+
 function timeExtent(data: unknown[]): Series.Extent | null {
   if (data.length === 0) return null;
   return { min: 0, max: data.length - 1 };
@@ -189,11 +198,17 @@ export const LineSeries = Series.define({
         if (opts.lineType === "circles") {
           ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
           ctx.fill();
-          // Large bubbles get a crisp outer ring so overlapping and nested circles stay distinct.
+          // Scale large-bubble outline opacity with the bubble color's own alpha so transparency fades both fill and border.
           if (radius >= 5) {
-            ctx.strokeStyle = Color.withAlpha(point.color, 0.95);
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            const alpha = colorAlpha(point.color);
+            if (alpha > 0) {
+              ctx.strokeStyle = Color.withAlpha(
+                point.color,
+                Math.min(0.95, alpha * 1.3),
+              );
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+            }
           }
         } else {
           ctx.strokeStyle = point.color;
