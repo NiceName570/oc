@@ -6,8 +6,10 @@
 - `widget-gallery.tsx` adds placements immediately, passing definitions.
   Chart offers symbol selection when its grid is missing; Watchlist selects
   lists in its view. Dashboard owns placement writes and save recovery.
-- Feature adapters stay in `features/chart`, `features/workspace` and
-  `features/watchlist`; Watchlist gets SymbolPicker through
+- Feature adapters stay in `features/chart`, `features/workspace`,
+  `features/watchlist` and `features/kalshi` (`kalshi` remains registered in
+  `widgetCatalog` for saved dashboards, alongside the dedicated right-side
+  `app/kalshi` drawer); Watchlist gets SymbolPicker through
   `WatchlistSymbolPicker` and its Formula picker from `formula-code-picker.tsx`
   (study catalog plus Workspace files). Alerts are not a widget. Contracts stay
   in `lib/widget`. Features never import app.

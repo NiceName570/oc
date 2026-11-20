@@ -5,9 +5,10 @@
   AccountConnectionProvider wraps the workspace, which opens signed in or out.
   AppHostProvider supplies native operations. Route changes detach observations
   without cancelling execution; the last subscriber closes SSE.
-- Layout retains LeftSidebar, SidebarInset/Outlet and CopilotAgent. It owns
-  Copilot selection/visibility; CopilotControlsProvider shares controls. Full-page
-  Agent routes hide Copilot. Preserve mobile navigation and sidebar resizing.
+- Layout retains LeftSidebar, SidebarInset/Outlet, CopilotAgent and
+  KalshiSidePanel (mutually exclusive right drawers). It owns selection and
+  visibility via CopilotControlsProvider and KalshiPanelControlsProvider.
+  Full-page Agent routes hide Copilot. Preserve mobile navigation and sidebar resizing.
 - Layout's assistant-ui modelContext joins page contributors and Copilot.
   Contributors retain their state; Copilot captures context before submission.
   Conversation runtimes remain isolated.
@@ -19,9 +20,11 @@
   Layout owns rename dialogs; FullPageAgent selects Sessions before submitting.
   UnsavedChangesProvider spans the sidebar and routed pages.
   `route-context.ts` shares transport; `useAgentContext` shares Agent only.
-- Follow [agent](agent/AGENTS.md), [dashboard](dashboard/AGENTS.md),
-  [trellis](trellis/AGENTS.md) and [widgets](widgets/AGENTS.md) ownership. Dashboard receives the registry and owns writes.
-  `page-header` composes sidebar/Copilot controls; `section-page` owns section frames.
+- Follow [agent](agent/AGENTS.md), [kalshi](kalshi/AGENTS.md),
+  [dashboard](dashboard/AGENTS.md), [trellis](trellis/AGENTS.md) and
+  [widgets](widgets/AGENTS.md) ownership. Dashboard receives the registry and
+  owns writes. `page-header` composes sidebar, KalshiTrigger and CopilotTrigger;
+  `section-page` owns section frames.
 - RouterProvider uses `useTransitions={false}` so navigation commits observations
   before waiting for live state. Query owns directory caches.
 - AppProvider owns Query/error providers and one Sonner toaster. Query reports

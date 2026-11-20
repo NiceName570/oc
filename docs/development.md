@@ -57,6 +57,20 @@ For signed, notarized macOS releases, follow the
 explicit operator action: merging code runs CI without publishing an application
 update. Hosted services and the website are deployed separately.
 
+### Windows local packaging & updates
+
+To build a portable Windows desktop executable (`platform/desktop/out/0.1.25/OpenChart-win32-x64/OpenChart.exe`) from source:
+
+```powershell
+# Close any running OpenChart.exe from the build folder first so Windows doesn't lock files
+Get-Process -Name "*OpenChart*" -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -eq "C:\Users\crucial\Projects\oc\platform\desktop\out\0.1.25\OpenChart-win32-x64\OpenChart.exe" } |
+  Stop-Process -Force
+npm --prefix platform/desktop run package
+```
+
+When pulling or merging upstream updates cleanly into your fork, verify `git status --short` is clean before pulling (`git pull --rebase`), then re-run `npm install` (if lockfiles changed) and `npm --prefix platform/desktop run package`. Note that ESLint over `app/` can hang on Windows; verify frontend changes via `npm run typecheck`, `npx prettier --check`, and targeted `vitest run` suites, plus `npx eslint --max-warnings 0` on `server/**/*.ts`.
+
 ## Repository
 
 | Directory           | Responsibility                                                     |
