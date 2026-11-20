@@ -186,3 +186,63 @@ it("step lines create horizontal then vertical edges and keep gaps", () => {
   expect(ctx.lineTo).toHaveBeenCalledWith(30, 30);
   expect(ctx.lineTo).not.toHaveBeenCalledWith(70, 50);
 });
+
+describe("LineSeries circles outline ring", () => {
+  it("renders small circles as pure filled dots without stroke", () => {
+    const options = {
+      ...LineSeries.defaultOptions,
+      lineType: "circles" as const,
+      lineWidth: 2,
+    };
+    const ctx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    const points = [
+      { x: 20, y: 40, index: 0, color: "rgba(124, 255, 46, 0.82)" },
+    ];
+
+    LineSeries.render(ctx, points, { from: 0, to: 1 }, options);
+
+    expect(ctx.arc).toHaveBeenCalledWith(20, 40, 3, 0, Math.PI * 2);
+    expect(ctx.fill).toHaveBeenCalledTimes(1);
+    expect(ctx.stroke).not.toHaveBeenCalled();
+  });
+
+  it("renders large bubble circles with a crisp high-opacity outline ring", () => {
+    const options = {
+      ...LineSeries.defaultOptions,
+      lineType: "circles" as const,
+      lineWidth: 10,
+    };
+    const ctx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    const points = [
+      { x: 20, y: 40, index: 0, color: "rgba(124, 255, 46, 0.82)" },
+    ];
+
+    LineSeries.render(ctx, points, { from: 0, to: 1 }, options);
+
+    expect(ctx.arc).toHaveBeenCalledWith(20, 40, 11, 0, Math.PI * 2);
+    expect(ctx.fill).toHaveBeenCalledTimes(1);
+    expect(ctx.stroke).toHaveBeenCalledTimes(1);
+    expect(ctx.lineWidth).toBe(1.5);
+    expect(ctx.strokeStyle).toBe("rgba(124, 255, 46, 0.95)");
+  });
+});

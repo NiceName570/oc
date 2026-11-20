@@ -1,0 +1,131 @@
+indicator("Order Flow Bubbles", overlay = true)
+// DeepCharts-inspired order-flow overlay computed from OHLCV candles:
+// proportional lime-green/red volume bubbles, nested opposite-color wick
+// absorption bubbles, untested olive-gold 3-bar imbalance (FVG) zones,
+// session volume profile with magenta POC, and optional green/purple candles.
+
+volLen = input.int(20, "Volume lookback", minval = 5, maxval = 200)
+bubbleMult = input.float(1.2, "Bubble threshold (x avg vol)", minval = 0.5, maxval = 5.0, step = 0.1)
+absorbRatio = input.float(0.30, "Absorption wick ratio", minval = 0.1, maxval = 0.8, step = 0.05)
+minGapAtr = input.float(0.15, "Min imbalance gap (ATR)", minval = 0.0, maxval = 5.0, step = 0.05)
+profileWindow = input.string(chart.timeframe == "1" or chart.timeframe == "3" or chart.timeframe == "5" ? "4h" : chart.timeframe == "240" or chart.timeframe == "D" or chart.timeframe == "W" or chart.timeframe == "M" ? "Weekly" : "Daily", "Session profile window", options = ["4h", "Daily", "Weekly"])
+profileRowCount = input.int(24, "Profile rows", minval = 8, maxval = 80)
+showProfile = input.bool(true, "Show session volume profile")
+showZones = input.bool(true, "Show imbalance zones")
+colorCandles = input.bool(true, "DeepCharts candle colors (green/purple)")
+
+// --- 1. Proportional volume bubbles & nested opposite-side absorption ---
+volAvg = ta.sma(volume, volLen)
+relVol = volAvg > 0 ? volume / volAvg : 0.0
+ratio = bubbleMult > 0 ? relVol / bubbleMult : 0.0
+
+barRange = high - low
+bodyTop = math.max(open, close)
+bodyBottom = math.min(open, close)
+upperWick = high - bodyTop
+lowerWick = bodyBottom - low
+buyPressure = barRange > 0 ? (close - low) / barRange : (close >= open ? 0.65 : 0.35)
+isBuyBurst = close > open or (close == open and buyPressure >= 0.5)
+
+bubblePrice = (close + hl2) / 2
+bubbleColor = isBuyBurst ? color.new(#7CFF2E, 18) : color.new(#FF2020, 14)
+
+plot("bubble_xs", ratio >= 1.0 and ratio < 1.3 ? bubblePrice : na, "Bubble XS", color = bubbleColor, linewidth = 4, style = plot.style_circles, display = display.pane)
+plot("bubble_s", ratio >= 1.3 and ratio < 1.7 ? bubblePrice : na, "Bubble S", color = bubbleColor, linewidth = 8, style = plot.style_circles, display = display.pane)
+plot("bubble_m", ratio >= 1.7 and ratio < 2.25 ? bubblePrice : na, "Bubble M", color = bubbleColor, linewidth = 13, style = plot.style_circles, display = display.pane)
+plot("bubble_l", ratio >= 2.25 and ratio < 3.0 ? bubblePrice : na, "Bubble L", color = bubbleColor, linewidth = 20, style = plot.style_circles, display = display.pane)
+plot("bubble_xl", ratio >= 3.0 ? bubblePrice : na, "Bubble XL", color = bubbleColor, linewidth = 28, style = plot.style_circles, display = display.pane)
+
+// Nested opposite-color absorption bubbles on heavy opposing wick rejection
+oppWickRatio = barRange > 0 ? (isBuyBurst ? upperWick / barRange : lowerWick / barRange) : 0.0
+hasAbsorption = ratio >= 1.5 and oppWickRatio >= absorbRatio
+absorbColor = isBuyBurst ? color.new(#FF2020, 10) : color.new(#7CFF2E, 12)
+plot("absorb_s", hasAbsorption and ratio < 2.3 ? bubblePrice : na, "Absorption S", color = absorbColor, linewidth = 5, style = plot.style_circles, display = display.pane)
+plot("absorb_l", hasAbsorption and ratio >= 2.3 ? bubblePrice : na, "Absorption L", color = absorbColor, linewidth = 10, style = plot.style_circles, display = display.pane)
+
+// --- 2. Olive-gold untested imbalance (FVG) zones ---
+minGap = ta.atr(14) * minGapAtr
+bullGap = barstate.isconfirmed and low > high[2] and low - high[2] >= minGap
+bearGap = barstate.isconfirmed and high < low[2] and low[2] - high >= minGap
+
+var int bullStart = na
+var int bullEnd = na
+var float bullTop = na
+var float bullBottom = na
+var bool bullActive = false
+
+var int bearStart = na
+var int bearEnd = na
+var float bearTop = na
+var float bearBottom = na
+var bool bearActive = false
+
+bullFilled = barstate.isconfirmed and bullActive and low <= bullBottom
+bearFilled = barstate.isconfirmed and bearActive and high >= bearTop
+
+if bullActive
+    bullEnd := time
+if bearActive
+    bearEnd := time
+if bullFilled
+    bullActive := false
+if bearFilled
+    bearActive := false
+
+if bullGap
+    bullStart := time[2]
+    bullEnd := time
+    bullTop := low
+    bullBottom := high[2]
+    bullActive := true
+if bearGap
+    bearStart := time[2]
+    bearEnd := time
+    bearTop := low[2]
+    bearBottom := high
+    bearActive := true
+
+plotzone("bull_imbalance", showZones ? bullStart : na, showZones ? bullEnd : na, bullTop, bullBottom, color = bullActive ? color.new(#C5B358, 82) : color.new(#C5B358, 93), text = "Demand")
+plotzone("bear_imbalance", showZones ? bearStart : na, showZones ? bearEnd : na, bearTop, bearBottom, color = bearActive ? color.new(#C5B358, 82) : color.new(#C5B358, 93), text = "Supply")
+
+// --- 3. Session volume profile with magenta POC ---
+bucketMs = profileWindow == "4h" ? 14400000 : profileWindow == "Weekly" ? 604800000 : 86400000
+bucketId = int(math.floor(time / bucketMs))
+newPeriod = barstate.isfirst or bucketId != bucketId[1]
+var int start = na
+var int previousStart = na
+if newPeriod
+    previousStart := start
+    start := time
+
+highs = array.from(high)
+lows = array.from(low)
+volumes = array.from(volume)
+rising = array.from(close >= open)
+
+finished = showProfile and newPeriod and not barstate.isfirst
+forming = showProfile and barstate.islast and not finished and (barstate.ishistory or not barstate.isconfirmed)
+shown = ta.volumeProfile(highs, lows, volumes, rising, newPeriod, profileRowCount, compute = finished or forming)
+
+profileRows(p) =>
+    result = array.new<ProfileRow>()
+    rowCount = p.up.size()
+    if rowCount > 0
+        for k = 0 to rowCount - 1
+            up = ProfileSegment.new(p.up.get(k), color.new(#6EE7B7, 45), "Up volume")
+            down = ProfileSegment.new(p.down.get(k), color.new(#EA580C, 35), "Down volume")
+            result.push(ProfileRow.new(p.low + k * p.step, p.low + (k + 1) * p.step, array.from(up, down)))
+    result
+
+profileLevels(p) =>
+    result = array.new<ProfileLevel>()
+    if p.up.size() > 0
+        result.push(ProfileLevel.new(p.low + (p.poc + 0.5) * p.step, #D946EF, "Point of control"))
+    result
+
+barLength = nz(time - time[1], 60000)
+if finished or forming
+    verticalProfile("profile", finished ? previousStart : start, finished ? time : time + barLength, profileRows(shown), profileLevels(shown), "Session profile")
+
+// --- 4. DeepCharts green/purple candlesticks ---
+barcolor("candles", colorCandles ? (close >= open ? #4ADE80 : #9333EA) : na)

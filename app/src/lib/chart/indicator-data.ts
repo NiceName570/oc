@@ -40,6 +40,7 @@ export interface IndicatorPoint {
   offset: number;
   showLast: number;
   visible: boolean;
+  display: string;
   base: number;
   lineStyle: "solid" | "dashed" | "dotted";
   lineType: "linear" | "step" | "circles" | "cross";
@@ -60,6 +61,7 @@ export function indicatorPoint(
     offset: 0,
     showLast: 0,
     visible: true,
+    display: "all",
     base: 0,
     lineStyle: "solid",
     lineType: "linear",
@@ -76,6 +78,7 @@ export function indicatorPoint(
       lineWidth: point.linewidth,
       lineStyle: point.linestyle,
       visible: point.display !== "none",
+      display: point.display,
     };
   }
   const point = plot.parse(value);
@@ -94,6 +97,7 @@ export function indicatorPoint(
     offset: point.offset,
     showLast: point.show_last,
     visible: point.display !== "none",
+    display: point.display,
     base: point.histbase,
     lineType:
       point.style === "stepline"

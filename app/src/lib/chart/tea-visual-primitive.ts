@@ -285,11 +285,17 @@ export function createIndicatorPrimitive({
               width = Math.abs(x2 - x1),
               upper = Math.min(top, bottom),
               height = Math.abs(bottom - top);
+            const borderColor = value.color
+              ? (visualCssColor({
+                  ...value.color,
+                  a: Math.min(255, Math.round(value.color.a * 2.5)),
+                }) ?? color)
+              : color;
             painted.push({
               draw(ctx) {
                 ctx.fillStyle = color;
                 ctx.fillRect(left, upper, width, height);
-                ctx.strokeStyle = color;
+                ctx.strokeStyle = borderColor;
                 ctx.lineWidth = 1;
                 ctx.strokeRect(left, upper, width, height);
               },

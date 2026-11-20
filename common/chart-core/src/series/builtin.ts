@@ -185,13 +185,19 @@ export const LineSeries = Series.define({
         if (!point || !Number.isFinite(point.y)) continue;
         const radius = Math.max(2, opts.lineWidth + 1);
         ctx.fillStyle = point.color;
-        ctx.strokeStyle = point.color;
-        ctx.lineWidth = opts.lineWidth;
         ctx.beginPath();
         if (opts.lineType === "circles") {
           ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
           ctx.fill();
+          // Large bubbles get a crisp outer ring so overlapping and nested circles stay distinct.
+          if (radius >= 5) {
+            ctx.strokeStyle = Color.withAlpha(point.color, 0.95);
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
         } else {
+          ctx.strokeStyle = point.color;
+          ctx.lineWidth = opts.lineWidth;
           ctx.moveTo(point.x - radius, point.y);
           ctx.lineTo(point.x + radius, point.y);
           ctx.moveTo(point.x, point.y - radius);

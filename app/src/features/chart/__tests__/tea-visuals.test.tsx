@@ -1077,3 +1077,95 @@ it("shows each chart bar the last row that opened inside it", () => {
   ]);
   view.unmount();
 });
+
+it("applies circles style, linewidth, display metadata, and suppressed axis labels even when sparse rows are NaN, while saved preferences override", () => {
+  const { chart } = visualChart("circles-pane");
+  const preferences = createChartPreferences("circles-pane");
+  const bubbleFields = [visualField("bubble_xl", "Plot", plotFields)];
+  const compiledBubbles = {
+    ...node,
+    declaration: {
+      kind: "indicator",
+      title: "Bubbles",
+      overlay: true,
+      timeframe: "",
+    },
+    definition: { ...node.definition, outputs: new Schema(bubbleFields) },
+  } satisfies Tea.CompileResponse;
+  const schema = new Schema([
+    new Field("time", new TimestampMillisecond(), false),
+    ...bubbleFields,
+  ]);
+  const color = { r: 124, g: 255, b: 46, a: 210 };
+  const frame = fromRows(
+    schema,
+    [1000, 2000].map((time) => ({
+      time,
+      bubble_xl: {
+        id: "bubble_xl",
+        series: Number.NaN,
+        title: "Bubble XL",
+        color,
+        linewidth: 28,
+        style: "circles",
+        trackprice: false,
+        histbase: 0,
+        offset: 0,
+        editable: true,
+        show_last: 0,
+        display: "pane",
+        format: "inherit",
+        precision: 2,
+      },
+    })),
+  );
+  const view = render(
+    <ChartContext.Provider value={chart}>
+      <TeaVisuals
+        sourceId="indicator"
+        compiled={compiledBubbles}
+        frame={frame}
+        bindings={[
+          {
+            id: "bubble-out",
+            output: "bubble_xl",
+            pane: 0,
+            paneId: "main",
+            mainPane: true,
+          },
+        ]}
+        preferences={preferences}
+      />
+    </ChartContext.Provider>,
+  );
+
+  const rendered = v2.ChartStateUtils.getSeries(
+    chart.store.getState(),
+    "bubble-out",
+  );
+  expect(rendered?.options).toMatchObject({
+    title: "Bubble XL",
+    lineType: "circles",
+    lineWidth: 28,
+    lastValueVisible: false,
+    valueLineVisible: false,
+  });
+  expect(rendered?.data).toMatchObject([
+    { time: 1, display: "pane" },
+    { time: 2, display: "pane" },
+  ]);
+
+  act(() => {
+    updateSeriesStyles(preferences, ["bubble-out"], {
+      lastValueVisible: true,
+    });
+  });
+  expect(
+    v2.ChartStateUtils.getSeries(chart.store.getState(), "bubble-out")?.options,
+  ).toMatchObject({
+    lineType: "circles",
+    lineWidth: 28,
+    lastValueVisible: true,
+  });
+  view.unmount();
+});

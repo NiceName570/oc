@@ -53,14 +53,34 @@ function outputNumbers(value: unknown): (number | null)[] {
   if (value === null || value === undefined) return [];
   const profile = value as {
     rows?: { low: number; high: number; segments: { value: number }[] }[];
+    levels?: { y: number }[];
   };
   if (profile.rows)
-    return profile.rows.flatMap((row) => [
-      row.low,
-      row.high,
-      ...row.segments.map((segment) => segment.value),
-    ]);
-  return [(value as { series: number | null }).series];
+    return [
+      ...profile.rows.flatMap((row) => [
+        row.low,
+        row.high,
+        ...row.segments.map((segment) => segment.value),
+      ]),
+      ...(profile.levels ?? []).map((level) => level.y),
+    ];
+  const zone = value as {
+    top?: number | null;
+    bottom?: number | null;
+  };
+  if ("top" in zone && "bottom" in zone) {
+    return [zone.top ?? null, zone.bottom ?? null];
+  }
+  const barColor = value as {
+    color?: { r: number; g: number; b: number; a: number } | null;
+    series?: number | null;
+  };
+  if (!("series" in barColor)) {
+    return barColor.color
+      ? [barColor.color.r, barColor.color.g, barColor.color.b, barColor.color.a]
+      : [];
+  }
+  return [barColor.series ?? null];
 }
 
 const market = Schema.decodeUnknownSync(BarsSeries)({
@@ -72,9 +92,9 @@ const market = Schema.decodeUnknownSync(BarsSeries)({
 });
 
 describe("indicator templates", () => {
-  it("contains 71 originals and 30 curated studies without duplicate identities", () => {
-    expect(indicatorCatalog).toHaveLength(101);
-    expect(new Set(indicatorCatalog.map((entry) => entry.id)).size).toBe(101);
+  it("contains 72 originals and 30 curated studies without duplicate identities", () => {
+    expect(indicatorCatalog).toHaveLength(102);
+    expect(new Set(indicatorCatalog.map((entry) => entry.id)).size).toBe(102);
     expect(indicatorCatalog.filter((entry) => entry.discovery)).toHaveLength(
       30,
     );
@@ -138,6 +158,48 @@ describe("indicator templates", () => {
         for (const field of node.module.outputs.schema.fields.filter((f) =>
           f.metadata.has("tea:write"),
         )) {
+          if (entry.id === "order-flow-bubbles") {
+            const allValues = output.flatMap((row) =>
+              outputNumbers(row[field.name]),
+            );
+            expect(
+              allValues.every(
+                (value) =>
+                  value === null ||
+                  Number.isFinite(value) ||
+                  Number.isNaN(value),
+              ),
+              `${entry.id}/${field.name}`,
+            ).toBe(true);
+            if (field.name === "candles") {
+              const values = outputNumbers(output.at(-1)![field.name]);
+              expect(
+                values.length,
+                `${entry.id}/${field.name}`,
+              ).toBeGreaterThan(0);
+              expect(
+                values.every((value) => Number.isFinite(value)),
+                `${entry.id}/${field.name}`,
+              ).toBe(true);
+            }
+            if (field.name === "profile") {
+              const profileRows = output.filter(
+                (row) => row[field.name] !== null,
+              );
+              expect(
+                profileRows.length,
+                `${entry.id}/${field.name}`,
+              ).toBeGreaterThan(0);
+              for (const row of profileRows) {
+                const values = outputNumbers(row[field.name]);
+                expect(values.length).toBeGreaterThan(0);
+                expect(values.every((value) => Number.isFinite(value))).toBe(
+                  true,
+                );
+              }
+            }
+            continue;
+          }
           const values = outputNumbers(output.at(-1)![field.name]);
           expect(values.length, `${entry.id}/${field.name}`).toBeGreaterThan(0);
           expect(
@@ -256,3 +318,244 @@ it.each([
     }
   },
 );
+
+it("order-flow-bubbles emits scaled bubbles, nested absorption, imbalance zones and session profile without lookahead", async () => {
+  const source = await readFile(
+    new URL("./builtins/order-flow-bubbles.tea", import.meta.url),
+    "utf8",
+  );
+  const compiled = tea`${source}`;
+  const runScenario = async (
+    bars: readonly {
+      time: number;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+    }[],
+  ) => {
+    const node = createNode(
+      compiled.module.bind(
+        {},
+        marketContext(compiled.module.inputs, [market], market.resolution),
+      ),
+      pineBuiltinSupplier(),
+    );
+    const columns = node.module.inputs.schema.fields.map((field) => field.name);
+    const stream = new DataStream(
+      columnSchema(columns),
+      from(
+        bars.map((bar, index) => {
+          const derived: Record<string, number> = {
+            ...bar,
+            hl2: (bar.high + bar.low) / 2,
+            hlc3: (bar.high + bar.low + bar.close) / 3,
+            ohlc4: (bar.open + bar.high + bar.low + bar.close) / 4,
+          };
+          return {
+            time: bar.time,
+            provisional: index === bars.length - 1,
+            ...Object.fromEntries(
+              columns.map((column) => [column, derived[column] ?? 0]),
+            ),
+          };
+        }),
+      ),
+    );
+    const run = node.bind(stream);
+    const rows: Datum[] = [];
+    try {
+      await new Promise<void>((resolve, reject) =>
+        run.to({
+          next: (row) => rows.push(structuredClone(row)),
+          error: reject,
+          complete: resolve,
+        }),
+      );
+      return rows;
+    } finally {
+      run.dispose();
+      node.dispose();
+    }
+  };
+
+  const bars = Array.from({ length: 80 }, (_, i) => {
+    const time = Date.UTC(2026, 0, 5) + i * 3_600_000;
+    if (i === 28) {
+      return {
+        time,
+        open: 101,
+        high: 103.8,
+        low: 100.8,
+        close: 103.5,
+        volume: 4000,
+      };
+    }
+    if (i === 32) {
+      return {
+        time,
+        open: 103,
+        high: 104.2,
+        low: 102.8,
+        close: 104,
+        volume: 1000,
+      };
+    }
+    if (i === 33) {
+      return {
+        time,
+        open: 104.2,
+        high: 109.2,
+        low: 104,
+        close: 109,
+        volume: 2200,
+      };
+    }
+    if (i === 34) {
+      return {
+        time,
+        open: 109,
+        high: 110.5,
+        low: 108.5,
+        close: 110,
+        volume: 1000,
+      };
+    }
+    if (i === 35 || i === 36) {
+      return {
+        time,
+        open: 108.5,
+        high: 109.5,
+        low: 108,
+        close: 108.5,
+        volume: 1000,
+      };
+    }
+    if (i === 37) {
+      return {
+        time,
+        open: 107,
+        high: 107.5,
+        low: 103,
+        close: 104,
+        volume: 1100,
+      };
+    }
+    if (i === 55) {
+      return {
+        time,
+        open: 106,
+        high: 106.5,
+        low: 96.5,
+        close: 105,
+        volume: 8000,
+      };
+    }
+    return {
+      time,
+      open: 100,
+      high: 101.2,
+      low: 99.8,
+      close: 100.5,
+      volume: 1000,
+    };
+  });
+
+  const output = await runScenario(bars);
+  expect(output).toHaveLength(bars.length);
+
+  // Baseline low-volume bar emits no volume bubbles.
+  for (const key of [
+    "bubble_xs",
+    "bubble_s",
+    "bubble_m",
+    "bubble_l",
+    "bubble_xl",
+  ]) {
+    expect(
+      Number.isFinite((output[10]![key] as { series: number }).series),
+    ).toBe(false);
+  }
+
+  // Bullish burst fires green bubble_l.
+  const bullBurst = output[28]!.bubble_l as {
+    series: number;
+    color: { r: number; g: number; b: number };
+  };
+  expect(Number.isFinite(bullBurst.series)).toBe(true);
+  expect(bullBurst.color).toMatchObject({ r: 124, g: 255, b: 46 });
+
+  // Climax bearish rejection fires red bubble_xl AND nested green absorb_l.
+  const climaxOuter = output[55]!.bubble_xl as {
+    series: number;
+    color: { r: number; g: number; b: number };
+  };
+  const climaxNested = output[55]!.absorb_l as {
+    series: number;
+    color: { r: number; g: number; b: number };
+  };
+  expect(Number.isFinite(climaxOuter.series)).toBe(true);
+  expect(climaxOuter.color).toMatchObject({ r: 255, g: 32, b: 32 });
+  expect(Number.isFinite(climaxNested.series)).toBe(true);
+  expect(climaxNested.color).toMatchObject({ r: 124, g: 255, b: 46 });
+
+  // Confirmed 3-bar upward imbalance extends until price drops to its bottom edge.
+  const fvgFormed = output[34]!.bull_imbalance as {
+    start_time: number;
+    end_time: number;
+    top: number;
+    bottom: number;
+  };
+  expect(fvgFormed).toMatchObject({
+    start_time: bars[32]!.time,
+    end_time: bars[34]!.time,
+    top: bars[34]!.low,
+    bottom: bars[32]!.high,
+  });
+  expect((output[37]!.bull_imbalance as { end_time: number }).end_time).toBe(
+    bars[37]!.time,
+  );
+  expect((output[38]!.bull_imbalance as { end_time: number }).end_time).toBe(
+    bars[37]!.time,
+  );
+
+  // Multi-day bars emit session volume profiles with magenta POC levels.
+  const profiles = output
+    .map((row) => row.profile)
+    .filter(
+      (
+        value,
+      ): value is {
+        rows: unknown[];
+        levels: { color: { r: number; g: number; b: number } }[];
+      } => value !== null && value !== undefined,
+    );
+  expect(profiles.length).toBeGreaterThanOrEqual(2);
+  expect(profiles[0]!.rows.length).toBeGreaterThan(0);
+  expect(profiles[0]!.levels[0]!.color).toMatchObject({
+    r: 217,
+    g: 70,
+    b: 239,
+  });
+
+  // Confirmed historical bar-level visuals never change when later bars arrive.
+  const prefix = await runScenario(bars.slice(0, 60));
+  const keys = [
+    "bubble_xs",
+    "bubble_s",
+    "bubble_m",
+    "bubble_l",
+    "bubble_xl",
+    "absorb_s",
+    "absorb_l",
+    "bull_imbalance",
+    "bear_imbalance",
+    "candles",
+  ];
+  for (let i = 0; i < 59; i++) {
+    for (const key of keys) {
+      expect(prefix[i]![key]).toEqual(output[i]![key]);
+    }
+  }
+});

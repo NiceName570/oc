@@ -251,22 +251,31 @@ export const TeaVisuals = memo(function TeaVisuals({
             .find(
               (point) => point.value !== null && Number.isFinite(point.value),
             );
+          const styleSample = appearance ?? points.at(-1);
           const defaults = defaultIndicatorOutputSeriesOptions({
             definitionName: compiled.declaration?.title,
             outputName: binding.output,
             outputIndex: index,
-            seriesType: appearance?.type ?? "Line",
+            seriesType: styleSample?.type ?? "Line",
           });
+          const suppressAxis =
+            styleSample?.display === "pane" ||
+            styleSample?.lineType === "circles" ||
+            styleSample?.lineType === "cross";
           authored = {
-            title: appearance?.title || binding.output,
-            type: appearance?.type ?? "Line",
-            color: appearance?.color ?? String(defaults.color),
-            lineWidth: appearance?.lineWidth ?? 1.5,
-            base: appearance?.base ?? 0,
-            lineType: appearance?.lineType ?? "linear",
-            lineStyle: appearance?.lineStyle ?? "solid",
-            visible: appearance?.visible ?? true,
-            xOffset: appearance?.offset ?? 0,
+            title: styleSample?.title || binding.output,
+            type: styleSample?.type ?? "Line",
+            color:
+              appearance?.color ?? styleSample?.color ?? String(defaults.color),
+            lineWidth: styleSample?.lineWidth ?? 1.5,
+            base: styleSample?.base ?? 0,
+            lineType: styleSample?.lineType ?? "linear",
+            lineStyle: styleSample?.lineStyle ?? "solid",
+            visible: styleSample?.visible ?? true,
+            xOffset: styleSample?.offset ?? 0,
+            ...(suppressAxis
+              ? { lastValueVisible: false, valueLineVisible: false }
+              : {}),
           };
           data = points.map((point, index) => ({
             ...point,

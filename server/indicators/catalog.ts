@@ -345,6 +345,11 @@ const indicatorTemplates = [
     category: "Volume",
   },
   {
+    id: "order-flow-bubbles",
+    name: "Order Flow Bubbles",
+    category: "Volume",
+  },
+  {
     id: "price-volume-trend",
     name: "Price Volume Trend",
     category: "Volume",
@@ -863,6 +868,13 @@ const indicatorDiscovery: Record<BuiltinIndicatorId, IndicatorDiscovery> = {
       "Plot On-Balance Volume in a separate pane. Add volume on bars with a higher close, subtract it on bars with a lower close, and add zero on unchanged closes.",
     description:
       "Accumulates volume according to close-to-close price direction. A rising line means more accumulated volume has accompanied rising closes; a falling line means the opposite. Compare its direction with price rather than its absolute level, which depends on the available history.",
+  },
+  "order-flow-bubbles": {
+    goals: ["read-volume", "read-structure"],
+    prompt:
+      "Overlay DeepCharts-style proportional green and red volume bubbles scaled by relative bar volume, nested opposite-color wick-absorption bubbles, untested olive-gold 3-bar imbalance (FVG) zones, a session volume profile with a magenta point of control, and optional green/purple candle colors.",
+    description:
+      "Highlights high-volume buying and selling bursts directly on price as proportionally sized lime-green and red circles, with nested opposite-color absorption circles on heavy opposing wicks, olive-gold untested imbalance zones, and a session volume profile with magenta POC. Computed from OHLCV candles so it works on any feed or timeframe rather than requiring CME Level 2 tick data.",
   },
   "price-volume-trend": {
     goals: ["read-volume", "follow-trends", "find-reversals"],

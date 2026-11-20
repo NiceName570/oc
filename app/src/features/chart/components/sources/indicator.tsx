@@ -318,64 +318,74 @@ export function IndicatorSource({
                 order={0}
                 localStore={localStore}
                 disabled={busy}
-                describe={(values) => ({
-                  title,
-                  content:
-                    values.length || reads.labels.length
-                      ? [
-                          reads.labels.length ? (
-                            <span
-                              key="reads"
-                              data-indicator-reads
-                              aria-label={`Also reads ${reads.labels.join(", ")} data`}
-                              className="text-muted-foreground"
-                            >
-                              {reads.labels.join(" · ")}
-                            </span>
-                          ) : null,
-                          from ? (
-                            <span
-                              key="from"
-                              data-indicator-from
-                              className="text-muted-foreground"
-                            >
-                              from {from}
-                            </span>
-                          ) : null,
-                          ...values.map((value, index) => {
-                            const label = String(
-                              value.row?.title ||
-                                legendOutputs[index]?.output ||
-                                value.label,
-                            );
-                            const number =
-                              typeof value.row?.value === "number" &&
-                              Number.isFinite(value.row.value)
-                                ? value.row.value.toLocaleString(undefined, {
-                                    maximumFractionDigits: 4,
-                                  })
-                                : "—";
-                            return (
+                describe={(values) => {
+                  const legendValues = values.filter((value) => {
+                    const display = value.row?.display;
+                    return display !== "pane" && display !== "none";
+                  });
+                  return {
+                    title,
+                    content:
+                      legendValues.length || reads.labels.length
+                        ? [
+                            reads.labels.length ? (
                               <span
-                                key={value.id}
-                                data-indicator-output={value.id}
-                                role="group"
-                                aria-label={`${label}: ${number}`}
-                                className="inline-flex items-center gap-1"
+                                key="reads"
+                                data-indicator-reads
+                                aria-label={`Also reads ${reads.labels.join(", ")} data`}
+                                className="text-muted-foreground"
                               >
-                                <span
-                                  data-testid="indicator-output-color"
-                                  aria-hidden="true"
-                                  className="size-1.5 shrink-0 rounded-xs"
-                                  style={{ background: value.color }}
-                                />
-                                <span>{number}</span>
+                                {reads.labels.join(" · ")}
                               </span>
-                            );
-                          }),
-                        ]
-                      : "—",
-                })}
+                            ) : null,
+                            from ? (
+                              <span
+                                key="from"
+                                data-indicator-from
+                                className="text-muted-foreground"
+                              >
+                                from {from}
+                              </span>
+                            ) : null,
+                            ...legendValues.map((value) => {
+                              const label = String(
+                                value.row?.title ||
+                                  legendOutputs.find(
+                                    (item) => item.id === value.id,
+                                  )?.output ||
+                                  value.label,
+                              );
+                              const number =
+                                typeof value.row?.value === "number" &&
+                                Number.isFinite(value.row.value)
+                                  ? value.row.value.toLocaleString(undefined, {
+                                      maximumFractionDigits: 4,
+                                    })
+                                  : "—";
+                              return (
+                                <span
+                                  key={value.id}
+                                  data-indicator-output={value.id}
+                                  role="group"
+                                  aria-label={`${label}: ${number}`}
+                                  className="inline-flex items-center gap-1"
+                                >
+                                  <span
+                                    data-testid="indicator-output-color"
+                                    aria-hidden="true"
+                                    className="size-1.5 shrink-0 rounded-xs"
+                                    style={{ background: value.color }}
+                                  />
+                                  <span>{number}</span>
+                                </span>
+                              );
+                            }),
+                          ]
+                        : values.length === 0
+                          ? "—"
+                          : null,
+                  };
+                }}
                 extraActions={actions.map(
                   ({ id, label, Icon, marked, disabled, run }) => (
                     <Tooltip key={id}>
