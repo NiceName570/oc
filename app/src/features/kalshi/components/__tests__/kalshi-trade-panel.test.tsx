@@ -543,14 +543,16 @@ describe("KalshiTradePanel", () => {
       });
     });
 
-    await user.click(screen.getByRole("button", { name: "Sell 10 YES @ 72¢" }));
+    await user.click(
+      screen.getByRole("button", { name: "Sell 10 YES (Mkt ~72¢)" }),
+    );
     expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
     await waitFor(() => {
       expect(placeOrderMock).toHaveBeenCalledWith({
         ticker: "KXBTC15M-26NOV191330-30",
         action: "sell_yes",
         count: 10,
-        limitPriceDollars: 0.72,
+        limitPriceDollars: 0.01,
         exchangeIndex: 2,
         takeProfitOffsetCents: undefined,
         stopLossOffsetCents: undefined,
@@ -559,6 +561,86 @@ describe("KalshiTradePanel", () => {
     expect(
       await screen.findByText(
         "Sell YES: 10.00/10 filled @ 72¢ (ord-sell-now).",
+      ),
+    ).toBeTruthy();
+  });
+
+  test("keeps marketable close enabled when exit bid is null and reports empty order book on 0 fill", async () => {
+    const user = userEvent.setup();
+    const placeOrderMock = vi.fn().mockResolvedValue({
+      ok: true,
+      order: {
+        orderId: "ord-sell-empty",
+        clientOrderId: "cid-sell-empty",
+        fillCount: "0.00",
+        remainingCount: "0.00",
+        averageFillPrice: null,
+        averageFeePaid: null,
+        timestampMs: Date.now(),
+      },
+      bracket: null,
+    });
+
+    renderPanel({
+      snapshot: async () =>
+        makeSnapshot({
+          connected: true,
+          maskedApiKeyId: "abcd...wxyz",
+          maxOrderDollars: 25,
+          market: {
+            ticker: "KXBTC15M-26NOV191330-30",
+            eventTicker: "KXBTC15M-26NOV191330",
+            title: "BTC 15m up or down",
+            strikeDollars: 62653.28,
+            openTime: "2026-11-19T18:15:00Z",
+            closeTime: new Date(Date.now() + 9 * 60 * 1000).toISOString(),
+            exchangeIndex: 2,
+            yesBidDollars: null,
+            yesAskDollars: 0.81,
+            noBidDollars: 0.18,
+            noAskDollars: 0.2,
+            lastPriceDollars: 0.8,
+          },
+          balance: {
+            balanceDollars: 75,
+            portfolioValueDollars: 82.2,
+            updatedAt: Date.now(),
+          },
+          position: {
+            ticker: "KXBTC15M-26NOV191330-30",
+            side: "yes",
+            contracts: 4,
+            costBasisDollars: 2.0,
+            realizedPnlDollars: 0,
+            feesPaidDollars: 0.02,
+            exitBidDollars: null,
+            exitProceedsDollars: null,
+            estimatedPnlDollars: null,
+          },
+        }),
+      placeOrder: placeOrderMock,
+    });
+
+    const sellButton = await screen.findByRole("button", {
+      name: "Sell 4 YES (Mkt)",
+    });
+    expect((sellButton as HTMLButtonElement).disabled).toBe(false);
+    await user.click(sellButton);
+
+    await waitFor(() => {
+      expect(placeOrderMock).toHaveBeenCalledWith({
+        ticker: "KXBTC15M-26NOV191330-30",
+        action: "sell_yes",
+        count: 4,
+        limitPriceDollars: 0.01,
+        exchangeIndex: 2,
+        takeProfitOffsetCents: undefined,
+        stopLossOffsetCents: undefined,
+      });
+    });
+    expect(
+      await screen.findByText(
+        "Sell YES: 0 filled — no resting bids available on the order book.",
       ),
     ).toBeTruthy();
   });

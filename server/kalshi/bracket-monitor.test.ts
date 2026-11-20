@@ -291,6 +291,82 @@ describe("kalshi bracket monitor execution", () => {
     });
   });
 
+  test("defaults stop-loss to a 1¢ marketable reduce_only IOC sweep when no buffer is configured", async () => {
+    const runtime = createTestRuntime();
+    runtimes.push(runtime);
+    const { privateKey } = crypto.generateKeyPairSync("ed25519");
+    await runtime.runPromise(
+      saveKalshiCredentials({
+        apiKeyId: "ak-bracket-mkt-sl",
+        privateKeyPem: privateKey
+          .export({ format: "pem", type: "pkcs8" })
+          .toString(),
+        maxOrderDollars: 5,
+      }),
+    );
+
+    const posted: Array<Record<string, unknown>> = [];
+    const monitor = createBracketMonitor({
+      pollIntervalMs: 0,
+      fetchImpl: async (input, init) => {
+        const url = String(input);
+        if (url.includes("/portfolio/positions")) {
+          return jsonResponse({
+            market_positions: [
+              {
+                ticker: "KXBTC15M-26NOV191715-15",
+                position_fp: "6.00",
+                market_exposure_dollars: "3.00",
+                realized_pnl_dollars: "0.00",
+                fees_paid_dollars: "0.02",
+              },
+            ],
+          });
+        }
+        if (url.includes("/portfolio/events/orders")) {
+          posted.push(
+            JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+          );
+          return jsonResponse({
+            order_id: "ord-sl-mkt",
+            client_order_id: "cid-sl-mkt",
+            fill_count: "6.00",
+            remaining_count: "0.00",
+            average_fill_price: "0.3100",
+            average_fee_paid: "0.0200",
+            ts_ms: 1763590002000,
+          });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      },
+    });
+
+    monitor.setRule({
+      runtime,
+      ticker: "KXBTC15M-26NOV191715-15",
+      side: "yes",
+      takeProfitDollars: 0.7,
+      stopLossDollars: 0.36,
+    });
+
+    const event = await monitor.evaluateWithMarket(
+      makeMarket({ yesBidDollars: 0.35 }),
+      runtime,
+    );
+    expect(event).toMatchObject({
+      trigger: "stop_loss",
+      status: "filled",
+      side: "yes",
+    });
+    expect(posted[0]).toMatchObject({
+      side: "ask",
+      count: "6.00",
+      price: "0.0100",
+      time_in_force: "immediate_or_cancel",
+      reduce_only: true,
+    });
+  });
+
   test("clears armed rules quietly when position is gone or contract rolls over", async () => {
     const runtime = createTestRuntime();
     runtimes.push(runtime);

@@ -11,7 +11,7 @@ import {
 import { readKalshiCredentials } from "./credentials";
 
 const DEFAULT_POLL_INTERVAL_MS = 1000;
-const DEFAULT_STOP_LOSS_SWEEP_BUFFER_DOLLARS = 0.02;
+const MARKET_CLOSE_FLOOR_DOLLARS = 0.01;
 
 /** Server-held automatic exit targets bound to the current active contract and side. */
 export interface KalshiBracketRule {
@@ -128,9 +128,7 @@ export function validateBracketPrices(input: {
 export function createBracketMonitor(options?: BracketMonitorOptions) {
   const fetchImpl = options?.fetchImpl;
   const pollIntervalMs = options?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-  const stopLossSweepBufferDollars =
-    options?.stopLossSweepBufferDollars ??
-    DEFAULT_STOP_LOSS_SWEEP_BUFFER_DOLLARS;
+  const stopLossSweepBufferDollars = options?.stopLossSweepBufferDollars;
 
   let activeRule: KalshiBracketRule | null = null;
   let activeRuntime: Runtime | null = null;
@@ -217,10 +215,13 @@ export function createBracketMonitor(options?: BracketMonitorOptions) {
         : "stop_loss";
       const label = hitTp ? "Take Profit" : "Stop Loss";
       const tpLimit = rule.takeProfitDollars ?? exitBid;
-      const slLimit = Math.max(
-        0.01,
-        Number((exitBid - stopLossSweepBufferDollars).toFixed(4)),
-      );
+      const slLimit =
+        stopLossSweepBufferDollars !== undefined
+          ? Math.max(
+              MARKET_CLOSE_FLOOR_DOLLARS,
+              Number((exitBid - stopLossSweepBufferDollars).toFixed(4)),
+            )
+          : MARKET_CLOSE_FLOOR_DOLLARS;
       const limitPriceDollars = hitTp ? tpLimit : slLimit;
 
       const order = await createOrderV2({

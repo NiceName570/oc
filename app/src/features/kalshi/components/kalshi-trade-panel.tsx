@@ -24,6 +24,7 @@ interface OrderBanner {
 }
 
 const SNAPSHOT_QUERY_KEY = ["kalshi", "snapshot"] as const;
+const MARKET_CLOSE_FLOOR_DOLLARS = 0.01;
 const DOLLAR_PRESETS = [5, 10, 25] as const;
 const SHARE_PRESETS = [1, 5, 10] as const;
 
@@ -281,9 +282,13 @@ export function KalshiTradePanel({
       }
       const filledNum = Number(result.order.fillCount);
       if (Number.isFinite(filledNum) && filledNum <= 0) {
+        const isSell =
+          order.action === "sell_yes" || order.action === "sell_no";
         setOrderBanner({
           tone: "error",
-          text: `${order.sideLabel}: 0 filled — live price moved past your ${formatCents(order.limitPriceDollars)} limit.`,
+          text: isSell
+            ? `${order.sideLabel}: 0 filled — no resting bids available on the order book.`
+            : `${order.sideLabel}: 0 filled — live price moved past your ${formatCents(order.limitPriceDollars)} limit.`,
         });
       } else {
         const effectiveFillPrice =
@@ -1032,15 +1037,11 @@ export function KalshiTradePanel({
               variant="outline"
               size="sm"
               className="h-8 text-xs font-medium"
-              disabled={
-                !market ||
-                position.exitBidDollars === null ||
-                placeOrderMutation.isPending
-              }
+              disabled={!market || placeOrderMutation.isPending}
               onClick={() =>
                 submitOrder(
                   position.side === "yes" ? "sell_yes" : "sell_no",
-                  position.exitBidDollars,
+                  MARKET_CLOSE_FLOOR_DOLLARS,
                   position.contracts,
                   `Sell ${position.side.toUpperCase()}`,
                 )
@@ -1048,7 +1049,9 @@ export function KalshiTradePanel({
             >
               {isSelling
                 ? "Selling..."
-                : `Sell ${position.contracts} ${position.side.toUpperCase()} @ ${formatCents(position.exitBidDollars)}`}
+                : position.exitBidDollars !== null
+                  ? `Sell ${position.contracts} ${position.side.toUpperCase()} (Mkt ~${formatCents(position.exitBidDollars)})`
+                  : `Sell ${position.contracts} ${position.side.toUpperCase()} (Mkt)`}
             </Button>
 
             <form

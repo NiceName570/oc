@@ -115,7 +115,7 @@ external-api.kalshi.com      api.coinbase.com/v2/prices/BTC-USD/spot
 
 ### 1-Click Orders & Dollars / Shares Sizing
 
-- **No confirmation popups:** Clicking **Buy YES**, **Buy NO**, or **Sell** submits immediately with in-flight lock (`placeOrderMutation.isPending`) to block accidental double clicks.
+- **No confirmation popups & marketable close:** Clicking **Buy YES**, **Buy NO**, or **Sell** submits immediately with an in-flight lock (`placeOrderMutation.isPending`) to block accidental double clicks. Manual closing sells (`sell_yes` / `sell_no`) submit a marketable `1¢` (`0.01`) `reduce_only` IOC sweep so Kalshi immediately fills across the best resting bids without rejecting on `1¢` ticks.
 - **`Dollars ($)` vs `Shares` toggle:**
   - Defaults to **`Dollars ($)`** (`$5` default, presets `$5`, `$10`, `$25`; switchable to `Shares` with presets `1`, `5`, `10`).
   - Whole contracts per side are floored in Dollar mode via `Math.floor((validAmount + 1e-9) / ask)` so actual spend (`contracts * ask`) never exceeds the entered dollar budget. If `validAmount < ask`, the button disables cleanly and displays `Min $0.XX`.
@@ -124,10 +124,10 @@ external-api.kalshi.com      api.coinbase.com/v2/prices/BTC-USD/spot
 
 - **Pre-buy offsets:** Optional `Auto TP (+¢)` and `Auto SL (-¢)` inputs are passed to `kalshi.placeOrder`. When a buy fills (`fillCount > 0`), `computeAutoBracketTargets` calculates `entry + tp/100` and `entry - sl/100` clamped to `$0.01–$0.99` (translated via `1 - averageFillPrice` for NO buys) and arms the server monitor.
 - **Post-buy adjustments:** Inside the **Open Position** card, users can edit `Take Profit (¢)` / `Stop Loss (¢)` (with live projected P&L previews) and call `kalshi.setBracket` or `kalshi.clearBracket`.
-- **1-second execution loop & SL sweep buffer:** While at least one target is armed, `BracketMonitor` polls `fetchActiveBtc15mMarket` every `1000ms`:
+- **1-second execution loop & marketable SL sweep:** While at least one target is armed, `BracketMonitor` polls `fetchActiveBtc15mMarket` every `1000ms`:
   - Verifies the position is still open via `fetchMarketPosition` right before submitting (`reduce_only: true`, `count: openPos.contracts`).
-  - **TP trigger:** `exitBid >= takeProfitDollars - 1e-9` -> IOC sell at `limit = takeProfitDollars`.
-  - **SL trigger:** `exitBid <= stopLossDollars + 1e-9` -> IOC sell at `limit = max(0.01, exitBid - 0.02)` (a `2¢` sweep floor so rapid drops still fill while preventing catastrophic zero-bid slippage).
+  - **TP trigger:** `exitBid >= takeProfitDollars - 1e-9` -> IOC sell at `limit = takeProfitDollars` so take profits never fill below your chosen target.
+  - **SL trigger:** `exitBid <= stopLossDollars + 1e-9` -> marketable IOC sell at `limit = 0.01` (`1¢`, or `exitBid - stopLossSweepBufferDollars` when explicitly configured in tests) so rapid drops still fill immediately across the best resting bids.
   - Clears automatically on full fill (`remainingCount <= 1e-6`), manual closing sell, `snapshot` seeing no open position, `15m` ticker rollover (`status: "closed"`), or `disconnect`.
   - Surfacing events: `lastBracketEvent` returns the latest fill/partial/missed/rollover/error message to the UI in a dismissible alert banner.
 

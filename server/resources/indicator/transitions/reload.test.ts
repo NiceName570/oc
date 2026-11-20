@@ -150,3 +150,51 @@ test("a deleted import or script fails with the Tea compile error and leaves the
     caller.resources.indicator.get({ id: indicator.id }),
   ).resolves.toEqual(indicator);
 });
+
+test("reloading an edited script prunes parameterOverrides for removed parameters while keeping active ones", async () => {
+  const workspaceId = await caller.resources.workspace.getDefault();
+  const v1 = [
+    'indicator("Prune", overlay = true)',
+    'len = input.int(14, "Length")',
+    'oldFlag = input.bool(true, "Removed")',
+    'plot("out", oldFlag ? close : open)',
+  ].join("\n");
+  const entry = await caller.workspace.write({
+    workspaceId,
+    path: "prune.tea",
+    text: v1,
+    expected: null,
+  });
+  const dashboard = await caller.resources.dashboard.create({ name: "Prune" });
+  const chart = await caller.resources.chart.create({
+    dashboardId: dashboard.id,
+  });
+  const indicator = await caller.resources.indicator.create({
+    chartId: chart.id,
+    cellId: "ccl_prune",
+    source: { workspaceId, path: "prune.tea" },
+    snapshot: { "prune.tea": v1 },
+    parameterOverrides: { len: 10, oldFlag: false },
+  });
+
+  const v2 = [
+    'indicator("Prune", overlay = true)',
+    'len = input.int(14, "Length")',
+    'plot("out", close)',
+  ].join("\n");
+  await caller.workspace.write({
+    workspaceId,
+    path: "prune.tea",
+    text: v2,
+    expected: entry.hash,
+  });
+
+  const reloaded = await caller.resources.indicator.reload({
+    id: indicator.id,
+    expectedRevision: indicator.revision,
+  });
+  expect(reloaded.parameterOverrides).toEqual({ len: 10 });
+  await expect(
+    caller.resources.indicator.get({ id: indicator.id }),
+  ).resolves.toMatchObject({ parameterOverrides: { len: 10 } });
+});

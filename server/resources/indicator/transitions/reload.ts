@@ -46,19 +46,38 @@ export const reload = Transition.make({
             tea.compile({ ...current.source, includeSources: true }),
             (node) => tea.dispose({ id: node.id }).pipe(Effect.orDie),
           );
-          return node.sources!;
+          return {
+            snapshot: node.sources!,
+            parameterNames: node.definition.parameters.map(
+              (parameter) => parameter.name,
+            ),
+          };
         }),
       );
     }),
-  apply: (tx, { id, expectedRevision }, snapshot) =>
+  apply: (tx, { id, expectedRevision }, { snapshot, parameterNames }) =>
     Effect.gen(function* () {
       const row = yield* loadExisting(indicatorStore, "indicator", tx, id);
       yield* checkRevision("indicator", row, expectedRevision);
       const current = yield* toEntity("indicator", IndicatorEntity, row);
-      if (isDeepStrictEqual(current.snapshot, snapshot)) return current;
+      const allowed = new Set(parameterNames);
+      const parameterOverrides = Object.fromEntries(
+        Object.entries(current.parameterOverrides).filter(([name]) =>
+          allowed.has(name),
+        ),
+      );
+      if (
+        isDeepStrictEqual(current.snapshot, snapshot) &&
+        isDeepStrictEqual(current.parameterOverrides, parameterOverrides)
+      )
+        return current;
       const saved = yield* indicatorStore.save(tx, id, {
         revision: row.revision + 1,
-        body: { ...Struct.omit(current, ENVELOPE_FIELD_NAMES), snapshot },
+        body: {
+          ...Struct.omit(current, ENVELOPE_FIELD_NAMES),
+          snapshot,
+          parameterOverrides,
+        },
       });
       return yield* toEntity("indicator", IndicatorEntity, saved);
     }),
