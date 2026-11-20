@@ -224,16 +224,22 @@ describe("KalshiTradePanel", () => {
     });
 
     expect(await screen.findByText("$62,653.28")).toBeTruthy();
-    expect(screen.getByText("$62,803.80")).toBeTruthy();
+    const spotAbove = screen.getByText("$62,803.80");
+    expect(spotAbove.className).toContain("text-emerald-600");
+    expect(spotAbove.className).not.toContain("text-rose-600");
     expect(screen.getByText(/\+\$150\.52 \(\+0\.24%\)/)).toBeTruthy();
     expect(screen.getByText("Connect Live Kalshi Key")).toBeTruthy();
 
     const buyYesDisconnected = screen.getByRole("button", {
       name: /Buy YES \(1\.9¢\)/,
     });
-    expect(
-      screen.getByRole("button", { name: /Buy NO \(98\.2¢\)/ }),
-    ).toBeTruthy();
+    const buyNoDisconnected = screen.getByRole("button", {
+      name: /Buy NO \(98\.2¢\)/,
+    });
+    expect(buyYesDisconnected.className).toContain("text-black");
+    expect(buyYesDisconnected.className).not.toContain("text-white");
+    expect(buyNoDisconnected.className).toContain("text-black");
+    expect(buyNoDisconnected.className).not.toContain("text-white");
 
     await user.click(buyYesDisconnected);
     expect(
@@ -260,6 +266,21 @@ describe("KalshiTradePanel", () => {
       await screen.findByRole("button", { name: /Buy YES \(81¢\)/ }),
     ).toBeTruthy();
     expect(screen.getByText("$125.50")).toBeTruthy();
+  });
+
+  test("colors BTC spot red when below strike", async () => {
+    renderPanel({
+      snapshot: async () =>
+        makeSnapshot({
+          spotUsd: 62500,
+          distanceDollars: -153.28,
+          distancePercent: -0.2446,
+        }),
+    });
+
+    const spotBelow = await screen.findByText("$62,500.00");
+    expect(spotBelow.className).toContain("text-rose-600");
+    expect(spotBelow.className).not.toContain("text-emerald-600");
   });
 
   test("works standalone via transport prop without WidgetContext and triggers onClose", async () => {

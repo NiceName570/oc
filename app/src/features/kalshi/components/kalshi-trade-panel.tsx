@@ -681,7 +681,18 @@ export function KalshiTradePanel({
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                 BTC Spot
               </div>
-              <div className="font-mono text-sm font-semibold tabular-nums">
+              <div
+                className={cn(
+                  "font-mono text-sm font-semibold tabular-nums",
+                  snapshot?.distanceDollars != null &&
+                    snapshot.distanceDollars > 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : snapshot?.distanceDollars != null &&
+                        snapshot.distanceDollars < 0
+                      ? "text-rose-600 dark:text-rose-400"
+                      : "text-foreground",
+                )}
+              >
                 {formatUsd(snapshot?.spotUsd)}
               </div>
             </div>
@@ -865,7 +876,7 @@ export function KalshiTradePanel({
           <div className="grid grid-cols-2 gap-2">
             <Button
               type="button"
-              className="h-9 bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="h-9 bg-emerald-500 text-xs font-bold text-black hover:bg-emerald-400 disabled:opacity-50"
               disabled={
                 !market ||
                 yesAsk === null ||
@@ -883,7 +894,7 @@ export function KalshiTradePanel({
             </Button>
             <Button
               type="button"
-              className="h-9 bg-rose-600 text-xs font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+              className="h-9 bg-red-400 text-xs font-bold text-black hover:bg-red-300 disabled:opacity-50"
               disabled={
                 !market ||
                 noAsk === null ||
